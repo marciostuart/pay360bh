@@ -7,7 +7,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /var/www/pay
-COPY app/ ./app/
 COPY bootstrap/ ./bootstrap/
 COPY public_html/ ./public_html/
 

@@ -54,8 +54,10 @@ function request_json(): array
 function start_secure_session(): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) return;
+    ini_set('session.use_strict_mode', '1');
     session_name('pay360bh_session');
-    session_set_cookie_params(['httponly' => true, 'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off', 'samesite' => 'Lax', 'path' => '/']);
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+    session_set_cookie_params(['httponly' => true, 'secure' => $https, 'samesite' => 'Lax', 'path' => '/']);
     session_start();
 }
 

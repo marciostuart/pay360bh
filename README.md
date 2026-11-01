@@ -69,7 +69,7 @@ Requisitos: PHP 8.3+, extensões `pdo_pgsql` e `curl`, PostgreSQL 14+.
 2. Aplique `database/migrations/001_central_sandbox_postgres.sql` somente no banco dedicado Sandbox, depois da cópia das tabelas de negócio.
 3. Sirva `public_html` como document root do PHP/Apache.
 
-Para gerar um hash de senha local, use `php -r 'echo password_hash("SENHA_ESCOLHIDA", PASSWORD_DEFAULT), PHP_EOL;'` e configure o hash no Portainer. Não publique `.env`, senhas, tokens ou chaves individuais no GitHub.
+Para gerar um hash de senha local sem colocar a senha na linha de comando, use `php -r '$p = readline("Senha nova: "); echo password_hash($p, PASSWORD_DEFAULT), PHP_EOL;'` e configure o hash no Portainer. Não publique `.env`, senhas, tokens ou chaves individuais no GitHub.
 
 ## Portainer e Traefik
 
