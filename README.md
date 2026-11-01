@@ -75,13 +75,13 @@ Para gerar um hash de senha local sem colocar a senha na linha de comando, use `
 
 Crie uma stack Git do repositório usando `compose.portainer.yml`. O serviço se conecta à rede Docker externa `360Network`, compartilhada com Traefik. O Compose não publica portas e não expõe PostgreSQL.
 
-Configure as variáveis obrigatórias no Portainer: `PAY_HOST` (host de homologação com DNS apontando para a VPS), `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `PAY_DB_PASSWORD`, `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. O resolver TLS esperado é `letsencryptresolver`, e o entrypoint é `websecure`, conforme a configuração do Traefik no VPS.
+Configure as variáveis obrigatórias no Portainer: `PAY_HOST` (host de homologação com DNS apontando para a VPS), `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. O Compose monta `/opt/360bh/secrets/pay360bh_db_password` como arquivo somente leitura dentro do container; esse arquivo é provisionado no VPS pelo script `ops/provision-pay-db-login.sh`. O resolver TLS esperado é `letsencryptresolver`, e o entrypoint é `websecure`, conforme a configuração do Traefik no VPS.
 
 Não use `pay.360bh.com.br` no teste inicial se o domínio ainda servir o legado. Só altere o DNS depois de validar login, banco, cadastro, cobrança Sandbox, webhook e recuperação. Durante homologação, manter o serviço antigo e seu MySQL facilita o rollback.
 
 ## PostgreSQL, papéis e acesso
 
-`database/migrations/001_central_sandbox_postgres.sql` adiciona colunas e índices sem apagar dados. Os papéis `central_pay_data`, `central_n8n_data` e `central_nocodb_data` são grupos `NOLOGIN` com permissões separadas. Antes de conectar aplicações, um administrador do PostgreSQL deve criar usuários `LOGIN` distintos e associar cada grupo. Não reutilize a credencial da aplicação NocoDB interna.
+`database/migrations/001_central_sandbox_postgres.sql` adiciona colunas e índices sem apagar dados. Os papéis `central_pay_data`, `central_n8n_data` e `central_nocodb_data` são grupos `NOLOGIN` com permissões separadas. O script `ops/provision-pay-db-login.sh` cria um usuário `LOGIN` restrito para o Pay e guarda a senha em arquivo protegido no VPS. Crie credenciais distintas para n8n e NocoDB; não reutilize a credencial da aplicação NocoDB interna.
 
 Conecte o NocoDB como fonte externa ao banco dedicado, com edição de schema desativada. O n8n deve usar seu usuário próprio e os nós de banco que leem/escrevem na nova base. Só remova ou arquive a antiga fonte após a homologação completa e backup.
 

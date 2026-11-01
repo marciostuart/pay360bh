@@ -22,10 +22,13 @@ function db(): PDO
         throw new RuntimeException('Configuração PostgreSQL inválida.');
     }
 
+    $passwordFile = envv('DB_PASSWORD_FILE');
+    $password = $passwordFile && is_readable($passwordFile) ? trim((string)file_get_contents($passwordFile)) : envv('DB_PASSWORD');
+    if ($password === null || $password === '') throw new RuntimeException('Credencial PostgreSQL do Pay não configurada.');
     $pdo = new PDO(
         "pgsql:host={$host};port={$port};dbname={$database};options='--search_path={$schema},public'",
         envv('DB_USERNAME'),
-        envv('DB_PASSWORD'),
+        $password,
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
     );
     return $pdo;

@@ -15,11 +15,13 @@ services:
       DB_DATABASE: central_cobrancas_sandbox
       DB_SCHEMA: pvfbh8yqws2olzw
       DB_USERNAME: pay360bh_login
-      DB_PASSWORD: ${PAY_DB_PASSWORD:?defina a senha do usuario PostgreSQL pay360bh_login}
+      DB_PASSWORD_FILE: /run/secrets/pay_db_password
       CENTRAL_N8N_PAYMENT_WEBHOOK_URL: ${CENTRAL_N8N_PAYMENT_WEBHOOK_URL:?defina a URL de producao do webhook Sandbox do n8n}
       CENTRAL_N8N_TOKEN: ${CENTRAL_N8N_TOKEN:?defina o token interno do webhook Sandbox}
     networks:
       - 360Network
+    volumes:
+      - /opt/360bh/secrets/pay360bh_db_password:/run/secrets/pay_db_password:ro
     labels:
       - traefik.enable=true
       - traefik.docker.network=360Network
