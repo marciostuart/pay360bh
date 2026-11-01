@@ -11,6 +11,8 @@ Aplicação PHP para administrar serviços, clientes compartilhados e cobranças
 - A migração é aditiva e cria campos para chaves individuais dos serviços e para o vínculo local cliente/projeto/cobrança.
 - A stack do Pay, o NocoDB e os fluxos n8n ainda precisam ser ligados à nova base e homologados juntos. O DNS oficial permanece inalterado.
 
+O registro de continuidade e o checklist de homologação estão em [`docs/ANDAMENTO-HOMOLOGACAO.md`](docs/ANDAMENTO-HOMOLOGACAO.md).
+
 ## Arquitetura
 
 ```text
