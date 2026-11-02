@@ -63,6 +63,28 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 - O workflow Sandbox grava explicitamente `created_at` ao registrar eventos Asaas e entregas aos serviços. A versão ativa foi publicada no n8n; o ajuste vale para novos registros, sem preencher horários históricos ausentes.
 - Commit 751eb0f atualiza o Pay e o Compose aponta para pay360bh-homolog:paylogs-webhook-751eb0f. Construir essa imagem no Portainer e redeployar sem Pull images; a tag anterior continua disponível para rollback.
 
+## Validacao autonoma da homologacao — 2026-11-02
+
+### Verificacoes concluidas nesta rodada
+
+- [x] Pay Sandbox responde em `/health` (HTTP 200) e a pagina de login responde (HTTP 200).
+- [x] Sintaxe PHP aprovada em `bootstrap/app.php`, `public_html/index.php` e `public_html/webhooks-panel.php`; `git diff --check` sem erros.
+- [x] A cobranca Sandbox de referencia `agora-foi` foi criada, confirmada no Asaas e atualizada para `RECEIVED` no mesmo registro PostgreSQL.
+- [x] O evento Asaas foi registrado/processado e a entrega ao servico de teste foi concluida com sucesso.
+- [x] Os fluxos separados de criacao Pix, recebimento Asaas, consulta de status, conciliacao, reprocessamento de eventos, reprocessamento de entregas, acoes administrativas e receptor de teste estao ativos.
+- [x] O fluxo combinado legado `Central de Cobrancas - Sandbox - Criacao Pix (prototipo)` foi arquivado. Os agendamentos dos fluxos separados continuam executando com sucesso depois do arquivamento.
+- [x] A amostra `.env.example` aponta para o endpoint Sandbox v2; nao contem credenciais reais.
+
+### Limites e validacoes ainda pendentes
+
+- [ ] Validacao visual no navegador autenticado do Pay: confirmar que o QR Pix e exibido numa cobranca pendente e escondido apos pagamento. A exibicao do horario de criacao ja foi confirmada pelo operador.
+- [ ] Revisao funcional pelo operador das telas de cadastro/edicao de clientes e servicos e das acoes manuais de cobranca.
+- [ ] Executar uma repeticao controlada da mesma chave de pedido no endpoint atual para confirmar o retorno idempotente sem criar nova cobranca.
+- [ ] Antes de producao: provisionar configuracao isolada e credenciais de producao do Asaas, registrar o webhook de producao, definir dominio/stack/segredos de producao e validar backup, restauracao e rollback.
+- [ ] Fazer uma cobranca de baixo valor em producao somente apos aprovacao operacional, confirmar webhook e entrega ao servico, e observar reconciliacao e recuperacao.
+
+O Docker CLI nao estava disponivel na maquina de trabalho nesta rodada; portanto nao foi feita validacao local de `docker compose config`. O endpoint do Pay e o fluxo em execucao foram verificados diretamente. Nenhuma alteracao foi feita no dominio oficial ou nas credenciais de producao.
+
 ## Fuso horário e data de criação das cobranças (2026-11-02)
 
 - O Pay interpreta timestamps PostgreSQL sem fuso como UTC e converte a exibição para `America/Sao_Paulo` (Brasília, UTC-3). Datas sem horário permanecem como datas de calendário.
