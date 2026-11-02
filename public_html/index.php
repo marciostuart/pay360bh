@@ -5,6 +5,7 @@ require dirname(__DIR__) . '/bootstrap/app.php';
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: same-origin');
 header('X-Frame-Options: DENY');
+header('X-Robots-Tag: noindex, nofollow, noarchive');
 header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'; img-src 'self' data:");
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -34,6 +35,7 @@ if ($path === '/logout' && $method === 'POST') {
 }
 
 if (empty($_SESSION['admin_authenticated'])) {
+    if ($path === '/documentacao') { header('Location: /login', true, 303); exit; }
     if ($method === 'POST' && $path === '/login') {
         csrf_check();
         $email = (string)($_POST['email'] ?? '');
@@ -65,6 +67,7 @@ if (empty($_SESSION['admin_authenticated'])) {
 
 if ($path === '/' || $path === '/login') { header('Location: /painel', true, 303); exit; }
 admin_required();
+if ($path === '/documentacao' && $method === 'GET') { header('Cache-Control: no-store, private'); require dirname(__DIR__) . '/bootstrap/documentacao.php'; exit; }
 $pdo = db();
 $toBool = static fn(mixed $value): bool => in_array($value, [true, 1, '1', 't', 'true'], true);
 $customerRoute = $path === '/clientes/novo' ? 'new' : (preg_match('#^/clientes/([0-9]+)/editar$#', $path, $routeMatch) ? 'edit' : null);
@@ -377,7 +380,7 @@ $csrf = csrf_token();
 $customerValue = static fn(string $key, string $default = ''): string => esc($customerForm[$key] ?? $editingCustomer[$key] ?? $default);
 $lastNoticeValue = array_key_exists('ultimo_aviso', $customerForm) ? (string)$customerForm['ultimo_aviso'] : '';
 if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer['ultimo_aviso'])) $lastNoticeValue = date('Y-m-d\TH:i', strtotime((string)$editingCustomer['ultimo_aviso']));
-?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Central de Cobranças | 360BH</title><link rel="stylesheet" href="/assets/panel.css"></head><body><div class="shell"><aside class="sidebar"><div class="brand">360BH <span>Central de Cobranças</span></div><nav><?php foreach (['resumo'=>'Visão geral','servicos'=>'Serviços','clientes'=>'Clientes','cobrancas'=>'Cobranças','webhooks'=>'Webhooks'] as $key => $label): ?><a class="<?=$activeTab === $key ? 'active' : ''?>" href="/painel?aba=<?=$key?>"><?=esc($label)?></a><?php endforeach; ?></nav><form method="post" action="/logout" class="logout-form"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><button class="logout">Sair</button></form></aside><main class="main"><header><div><p class="eyebrow">AMBIENTE SANDBOX</p><h1><?=esc($pageTitle)?></h1></div><span class="badge">Asaas via n8n</span></header>
+?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Central de Cobranças | 360BH</title><link rel="stylesheet" href="/assets/panel.css"></head><body><div class="shell"><aside class="sidebar"><div class="brand">360BH <span>Central de Cobranças</span></div><nav><?php foreach (['resumo'=>'Visão geral','servicos'=>'Serviços','clientes'=>'Clientes','cobrancas'=>'Cobranças','webhooks'=>'Webhooks'] as $key => $label): ?><a class="<?=$activeTab === $key ? 'active' : ''?>" href="/painel?aba=<?=$key?>"><?=esc($label)?></a><?php endforeach; ?><a href="/documentacao">Manual de integração</a></nav><form method="post" action="/logout" class="logout-form"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><button class="logout">Sair</button></form></aside><main class="main"><header><div><p class="eyebrow">AMBIENTE SANDBOX</p><h1><?=esc($pageTitle)?></h1></div><span class="badge">Asaas via n8n</span></header>
 <?php if ($flash): ?><div class="notice <?=esc($flash['type'])?>"><?=esc($flash['message'])?></div><?php endif; ?>
 <?php if ($issuedKey): ?><section class="notice warning"><strong>Chave do serviço — copie agora.</strong><p>Ela só aparece nesta tela uma vez. Guarde-a num cofre de senhas.</p><code><?=esc($issuedKey['key'])?></code><p>Serviço: <?=esc($issuedKey['code'])?> · Envie a chave no cabeçalho <code>X-Service-Key</code>.</p><?php if (envv('APP_ENV') === 'production'): ?><p><strong>Token de notificação do serviço — copie agora.</strong> Configure este valor no sistema que receberá os webhooks e confira o cabeçalho <code>X-Notificacao-Token</code>.</p><code><?=esc(service_notification_token((string)$issuedKey['key']))?></code><p>Ao trocar a chave do serviço, atualize também este token no sistema destinatário.</p><?php endif; ?></section><?php endif; ?>
 <?php if ($activeTab === 'webhooks') { require __DIR__ . '/webhooks-panel.php'; } else { ?>
