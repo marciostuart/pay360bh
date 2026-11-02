@@ -63,6 +63,15 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 - O workflow Sandbox grava explicitamente `created_at` ao registrar eventos Asaas e entregas aos serviços. A versão ativa foi publicada no n8n; o ajuste vale para novos registros, sem preencher horários históricos ausentes.
 - Commit 751eb0f atualiza o Pay e o Compose aponta para pay360bh-homolog:paylogs-webhook-751eb0f. Construir essa imagem no Portainer e redeployar sem Pull images; a tag anterior continua disponível para rollback.
 
+## Fuso horário e data de criação das cobranças (2026-11-02)
+
+- O Pay interpreta timestamps PostgreSQL sem fuso como UTC e converte a exibição para `America/Sao_Paulo` (Brasília, UTC-3). Datas sem horário permanecem como datas de calendário.
+- As telas de detalhes de cobrança e logs de webhooks usam a mesma conversão local; timestamps com offset explícito mantêm seu instante correto.
+- O detalhe da cobrança usa `PAYMENT_CREATED` como alternativa para recuperar a data de criação quando ela não estiver gravada diretamente na linha da cobrança.
+- O workflow Sandbox `dvocpj2y628A80Ks` foi atualizado e publicado para gravar UTC em `CreatedAt` ao inserir novas cobranças. A versão ativa é `1c1b72f3-1e9b-431d-a782-9e3b82beaa0b`.
+- A tag da imagem Pay foi atualizada para `pay360bh-homolog:brasil-timestamps-v1`. Construir essa tag no Portainer usando o repositório público e redeployar a stack sem selecionar “Pull images”. A tag anterior `paylogs-webhook-751eb0f` permanece disponível para rollback.
+- Não preencher timestamps antigos ausentes com horários estimados.
+
 
 ## Atualizacao: acoes do painel (2026-11-02)
 

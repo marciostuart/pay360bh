@@ -39,6 +39,29 @@ function esc(mixed $value): string
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function format_local_datetime(mixed $value, string $format = 'd/m/Y H:i:s'): string
+{
+    if ($value === null || trim((string)$value) === '') return '—';
+
+    $raw = trim((string)$value);
+    $localZone = new DateTimeZone('America/Sao_Paulo');
+
+    try {
+        // PostgreSQL timestamps without a zone are stored as UTC by the payment workflows.
+        // Date-only values represent calendar dates and must not move across midnight.
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $raw, new DateTimeZone('UTC'));
+            return $date ? $date->format('d/m/Y') : $raw;
+        }
+
+        $hasTimezone = preg_match('/(?:Z|[+-]\d{2}:?\d{2})$/i', $raw) === 1;
+        $dateTime = new DateTimeImmutable($raw, $hasTimezone ? null : new DateTimeZone('UTC'));
+        return $dateTime->setTimezone($localZone)->format($format);
+    } catch (Throwable) {
+        return $raw;
+    }
+}
+
 function json_out(array $data, int $status = 200): never
 {
     http_response_code($status);

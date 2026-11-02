@@ -1,6 +1,6 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:paylogs-webhook-751eb0f
+    image: pay360bh-homolog:brasil-timestamps-v1
     restart: unless-stopped
     environment:
       APP_ENV: homolog
