@@ -12,8 +12,8 @@ COPY public_html/ ./public_html/
 
 ENV APACHE_DOCUMENT_ROOT=/var/www/pay/public_html
 RUN sed -ri 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
-    && sed -ri 's!<Directory /var/www/>!<Directory ${APACHE_DOCUMENT_ROOT}/>!g' /etc/apache2/apache2.conf \
-    && sed -ri '/<Directory ${APACHE_DOCUMENT_ROOT}\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf \
+    && sed -ri 's!<Directory /var/www/>!<Directory /var/www/pay/public_html/>!g' /etc/apache2/apache2.conf \
+    && sed -ri '/<Directory \/var\/www\/pay\/public_html\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf \
     && chown -R www-data:www-data /var/www/pay
 
 EXPOSE 80
