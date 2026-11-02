@@ -79,7 +79,7 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 
 - [ ] Validacao visual no navegador autenticado do Pay: confirmar que o QR Pix e exibido numa cobranca pendente e escondido apos pagamento. A exibicao do horario de criacao ja foi confirmada pelo operador.
 - [ ] Revisao funcional pelo operador das telas de cadastro/edicao de clientes e servicos e das acoes manuais de cobranca.
-- [ ] Executar uma repeticao controlada da mesma chave de pedido no endpoint atual para confirmar o retorno idempotente sem criar nova cobranca.
+- [x] Repeticao controlada confirmada em 2026-11-02: duas chamadas identicas para a mesma chave `teste:idempotencia-20261102-175429` retornaram o mesmo ID Asaas; a segunda foi reconhecida como `pedido_existente`. A cobranca Sandbox permaneceu `PENDING`.
 - [ ] Antes de producao: provisionar configuracao isolada e credenciais de producao do Asaas, registrar o webhook de producao, definir dominio/stack/segredos de producao e validar backup, restauracao e rollback.
 - [ ] Fazer uma cobranca de baixo valor em producao somente apos aprovacao operacional, confirmar webhook e entrega ao servico, e observar reconciliacao e recuperacao.
 
