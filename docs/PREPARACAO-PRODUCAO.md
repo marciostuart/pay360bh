@@ -13,7 +13,7 @@ Estado em 2026-11-02: preparação em andamento. O banco de produção foi criad
 - `Dockerfile.production`: imagem baseada na aplicação homologada, com nomes de tabelas e textos próprios de produção.
 - `ops/prepare-production.php`: transforma a cópia da aplicação durante a construção da imagem. A construção falha se restarem referências de homologação nos arquivos processados.
 - `ops/provision-production-db.sh`: procedimento executado no VPS para criar o banco novo a partir da **estrutura** das cinco tabelas de negócio. Não copia linhas, credenciais de serviços, a tabela de usuários legada nem outros dados do NocoDB.
-- `n8n/producao/`: cinco definições sem segredos para criação de Pix, consulta, ações administrativas, conciliação e reprocessamento de eventos. Cinco cópias foram criadas no n8n, vinculadas às credenciais de produção e conferidas como inativas; ainda exigem testes de integração antes da publicação. O recebimento Asaas e o reenvio de entregas requerem adaptação do destino por serviço e não estão prontos.
+- `n8n/producao/`: sete definições sem segredos para criação de Pix, consulta, ações administrativas, conciliação, recebimento Asaas e reprocessamento de eventos e entregas. As sete cópias foram criadas no n8n, vinculadas às credenciais de produção e conferidas como inativas; exigem testes de integração antes da publicação.
 
 O procedimento de banco cria `central_cobrancas_prod`, o schema `central_cobrancas` e os logins restritos `pay360bh_prod_login` e `central_cobrancas_prod_n8n`. As senhas são geradas no VPS e guardadas em arquivos protegidos em `/opt/360bh/secrets`; não devem ser colocadas no Git ou na conversa. O script verifica se banco, logins ou arquivos já existem e interrompe em caso de conflito. Se qualquer etapa falhar após iniciar alterações, inspecionar o estado antes de repetir.
 
@@ -26,7 +26,9 @@ O procedimento de banco cria `central_cobrancas_prod`, o schema `central_cobranc
 - Ao executar a ferramenta administrativa do n8n, a instalação avisou que seu banco usa PostgreSQL 14, fora das versões atualmente suportadas pela ferramenta. Isso afeta a infraestrutura compartilhada e requer avaliação e planejamento de atualização antes da liberação comercial; nenhuma atualização foi feita nesta etapa.
 - A credencial n8n `Asaas Produção — Central` foi criada pelo operador e testada por consulta de leitura à situação cadastral do Asaas de produção: situação geral aprovada. Nenhuma cobrança real foi criada nesse teste.
 - As cinco tabelas de negócio existentes têm suas chaves primárias e as cobranças referenciam somente as tabelas locais de clientes e projetos; não foram encontrados gatilhos de usuário nessas tabelas. A inspeção foi somente de metadados.
-- Os fluxos de recebimento e reenvio de notificações ainda estão limitados ao projeto `teste`, à URL do receptor de teste e à respectiva credencial. Esses nós precisam ser adaptados e validados com destinos e autenticação por serviço antes de qualquer ativação comercial. Uma cópia literal enviaria para o destino errado.
+- Os fluxos originais de homologação estão limitados ao projeto `teste` e ao receptor de teste. Nas cópias de produção, os destinos são lidos do cadastro do serviço; o token de notificação é individual e enviado no cabeçalho `X-Notificacao-Token`. O token é apresentado uma vez pelo Pay ao criar ou trocar a chave de serviço; a troca invalida ambos. Serviços sem URL ou desativados não recebem notificações. A entrega ponta a ponta ainda precisa ser validada.
+- A derivação do token individual foi conferida entre PHP e PostgreSQL. Para proteger esse token, as cópias de recebimento e reenvio não persistem dados das execuções no n8n; o painel de webhooks continua usando os registros operacionais do PostgreSQL.
+- A imagem `pay360bh-production:0b9d4a0` foi construída na VPS e a conexão da aplicação ao banco, às tabelas vazias e ao arquivo do token interno foi verificada em container temporário. A imagem deve ser reconstruída após a inclusão do token individual no painel.
 - A criação inicial de um rascunho de produção no n8n associou automaticamente credenciais de outros serviços. O rascunho permaneceu inativo e foi arquivado; as cópias finais devem ter as credenciais de produção atribuídas e conferidas explicitamente antes da publicação.
 - O validador apontou avisos de credencial genérica HTTP nas definições preliminares. Elas devem reutilizar as credenciais corretas já criadas, por ID, e não criar credenciais automáticas de tipo genérico.
 
@@ -34,8 +36,8 @@ O procedimento de banco cria `central_cobrancas_prod`, o schema `central_cobranc
 
 1. Confirmar índices de unicidade e testar restauração de backup do banco de produção.
 2. Manter as credenciais independentes de produção no n8n. Nunca registrar seus valores no repositório.
-3. Concluir as cópias dos sete fluxos operacionais para produção e validar que cada cópia está inativa e não usa credenciais de homologação.
-4. Implementar e validar a entrega aos destinos cadastrados por serviço, inclusive autenticação, repetição e recuperação. Confirmar que não existe destino fixo de teste nem filtro pelo projeto `teste`.
+3. Testar as sete cópias inativas e confirmar as credenciais de produção antes da publicação.
+4. Validar a entrega aos destinos cadastrados por serviço, inclusive autenticação, repetição e recuperação. As cópias usam URL e token individuais, sem destino fixo de teste.
 5. Construir uma imagem de produção com `Dockerfile.production`, preencher as variáveis do Compose e testar a stack independente. Criar uma senha administrativa própria e forte para produção.
 6. Configurar o webhook de produção no Asaas, verificar backup e restauração e realizar a troca do domínio com plano de retorno. Fazer cobrança real controlada e conferir evento, estado e entrega de ponta a ponta.
 

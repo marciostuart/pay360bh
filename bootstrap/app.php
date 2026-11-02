@@ -136,6 +136,11 @@ function new_service_key(): string
     return rtrim(strtr(base64_encode(random_bytes(36)), '+/', '-_'), '=');
 }
 
+function service_notification_token(string $serviceKey): string
+{
+    return hash('sha256', 'pay360bh-notificacao-v1:' . hash('sha256', $serviceKey));
+}
+
 function money(int $cents): string
 {
     return 'R$ ' . number_format($cents / 100, 2, ',', '.');
