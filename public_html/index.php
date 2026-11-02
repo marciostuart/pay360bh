@@ -38,7 +38,15 @@ if (empty($_SESSION['admin_authenticated'])) {
         csrf_check();
         $email = (string)($_POST['email'] ?? '');
         $password = (string)($_POST['password'] ?? '');
-        $configuredHash = (string)envv('ADMIN_PASSWORD_HASH', '');
+        $configuredHash = '';
+        $encodedHash = (string)envv('ADMIN_PASSWORD_HASH_B64', '');
+        if ($encodedHash !== '') {
+            $decodedHash = base64_decode($encodedHash, true);
+            if ($decodedHash !== false) $configuredHash = $decodedHash;
+        } else {
+            // Compatibilidade temporária com implantações que ainda usam o hash direto.
+            $configuredHash = (string)envv('ADMIN_PASSWORD_HASH', '');
+        }
         if (hash_equals((string)envv('ADMIN_EMAIL', ''), $email) && $configuredHash !== '' && password_verify($password, $configuredHash)) {
             session_regenerate_id(true);
             $_SESSION['admin_authenticated'] = true;

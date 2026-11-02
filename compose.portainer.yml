@@ -1,12 +1,12 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:9c2ac86
+    image: pay360bh-homolog:login-b64
     restart: unless-stopped
     environment:
       APP_ENV: homolog
       APP_URL: https://${PAY_HOST:?defina o host de homologacao no Portainer}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?defina o email administrativo no Portainer}
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?defina o hash da senha administrativa no Portainer}
+      ADMIN_PASSWORD_HASH_B64: ${ADMIN_PASSWORD_HASH_B64:?defina o hash bcrypt em Base64 no Portainer}
       DB_DRIVER: pgsql
       DB_HOST: postgres-postgres-1
       DB_PORT: 5432

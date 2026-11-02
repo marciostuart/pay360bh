@@ -42,7 +42,7 @@ Este documento registra o ponto de parada desta sessão para retomarmos sem repe
 
 - [ ] Criar no GitHub um token fine-grained com acesso somente a `pay360bh` e conteúdo somente para leitura; guardá-lo em local seguro.
 - [ ] No Portainer, criar/salvar uma credencial Git com esse usuário e token. Criar a Stack `pay360bh-homolog` a partir do repositório, branch `main`, arquivo `compose.portainer.yml`.
-- [ ] Preencher as variáveis da Stack diretamente no Portainer: `PAY_HOST`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. Usar o host de homologação, nunca o domínio oficial nesta fase. Gerar o hash localmente; não usar a senha administrativa em texto puro.
+- [ ] Preencher as variáveis da Stack diretamente no Portainer: `PAY_HOST`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH_B64` (hash bcrypt codificado em Base64), `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. Usar o host de homologação, nunca o domínio oficial nesta fase. Gerar o hash localmente; não usar a senha administrativa em texto puro.
 - [ ] Para `CENTRAL_N8N_PAYMENT_WEBHOOK_URL`, usar o webhook de produção do workflow Sandbox: `https://automacao.360bh.com.br/webhook/central-cobrancas-sandbox-v1`. Configurar `CENTRAL_N8N_TOKEN` com o mesmo segredo esperado pela autenticação `x-central-token` do webhook; inserir o valor somente no Portainer.
 - [ ] Conferir se o ambiente do Portainer é Docker Standalone ou Swarm antes de implantar, pois o Compose usa `build:`. Se for Swarm, preparar a imagem em registry compatível antes da Stack.
 - [ ] Implantar e verificar container, logs, HTTPS/Traefik, `/health`, login e conexão ao banco; corrigir antes de conectar usuários.
