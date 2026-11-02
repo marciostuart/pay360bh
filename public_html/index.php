@@ -361,8 +361,9 @@ if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer[
 <section class="panel">
     <h2>Servicos cadastrados</h2>
     <div class="table-wrap">
-        <table>
-            <thead><tr><th>Codigo</th><th>Nome</th><th>Destino de notificacoes</th><th>Estado</th><th>Acoes</th></tr></thead>
+        <table class="service-table">
+            <colgroup><col><col><col><col><col></colgroup>
+            <thead><tr><th>Código</th><th>Nome</th><th>Destino de notificações</th><th>Estado</th><th>Ações</th></tr></thead>
             <tbody>
             <?php foreach ($projects as $p): ?>
                 <tr id="servico-<?=esc($p['id'])?>">
