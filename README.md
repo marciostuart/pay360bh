@@ -97,6 +97,6 @@ O workflow Sandbox usa a credencial PostgreSQL `Central Cobranças Sandbox` e os
 
 ### Acoes administrativas de cobrancas (Sandbox)
 
-A lista permite visualizar cada cobranca e, enquanto estiver pendente/vencida, solicitar ao Asaas o registro de recebimento integral por outro meio ou o cancelamento. O Pay valida a cobranca no PostgreSQL e chama o webhook administrativo autenticado do n8n; o n8n confere novamente o ID/status no PostgreSQL antes de chamar o Asaas. O Pay nao altera o status financeiro. O webhook Asaas continua responsavel por atualizar o estado oficial.
+A lista permite visualizar cada cobranca e, enquanto estiver pendente/vencida, solicitar ao Asaas o registro de recebimento integral por outro meio ou o cancelamento. O Pay valida a cobranca no PostgreSQL e chama o webhook administrativo autenticado do n8n; o n8n confere novamente o ID/status no PostgreSQL antes de chamar o Asaas. O Pay nao altera o status financeiro. O webhook Asaas continua responsavel por atualizar o estado oficial. O Asaas informa que, se houver negativacao em andamento, registrar recebimento externo pode gerar tarifa de ativacao do servico; confira isso antes de usar a baixa.
 
 A tela `/cobrancas/{id}` exibe detalhes e dados Pix disponiveis na resposta do n8n. Configure a URL administrativa Sandbox no Portainer antes de usar as acoes. Nenhuma acao financeira foi executada ao publicar esta funcionalidade.
