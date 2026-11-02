@@ -1,6 +1,6 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:service-row-aligned-v1
+    image: pay360bh-homolog:webhook-logs-a14c254
     restart: unless-stopped
     environment:
       APP_ENV: homolog
