@@ -1,8 +1,6 @@
 services:
   pay360bh:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: pay360bh-homolog:9c2ac86
     restart: unless-stopped
     environment:
       APP_ENV: homolog
