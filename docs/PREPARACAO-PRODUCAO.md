@@ -1,6 +1,6 @@
 # Preparação da Central de Cobranças para produção
 
-Estado em 2026-11-02: preparação em andamento. O banco de produção foi criado; a stack e os fluxos de produção ainda não foram implantados ou validados de ponta a ponta.
+Estado em 2026-11-02: stack e fluxos de produção implantados; ainda falta validar uma cobrança real de ponta a ponta antes do uso comercial.
 
 ## Acesso administrativo à VPS
 
@@ -13,7 +13,7 @@ Estado em 2026-11-02: preparação em andamento. O banco de produção foi criad
 - `Dockerfile.production`: imagem baseada na aplicação homologada, com nomes de tabelas e textos próprios de produção.
 - `ops/prepare-production.php`: transforma a cópia da aplicação durante a construção da imagem. A construção falha se restarem referências de homologação nos arquivos processados.
 - `ops/provision-production-db.sh`: procedimento executado no VPS para criar o banco novo a partir da **estrutura** das cinco tabelas de negócio. Não copia linhas, credenciais de serviços, a tabela de usuários legada nem outros dados do NocoDB.
-- `n8n/producao/`: sete definições sem segredos para criação de Pix, consulta, ações administrativas, conciliação, recebimento Asaas e reprocessamento de eventos e entregas. As sete cópias foram criadas no n8n, vinculadas às credenciais de produção e conferidas como inativas; exigem testes de integração antes da publicação.
+- `n8n/producao/`: sete definições sem segredos para criação de Pix, consulta, ações administrativas, conciliação, recebimento Asaas e reprocessamento de eventos e entregas. As cópias de produção foram vinculadas às credenciais corretas e publicadas; falta o teste financeiro real de ponta a ponta.
 
 O procedimento de banco cria `central_cobrancas_prod`, o schema `central_cobrancas` e os logins restritos `pay360bh_prod_login` e `central_cobrancas_prod_n8n`. As senhas são geradas no VPS e guardadas em arquivos protegidos em `/opt/360bh/secrets`; não devem ser colocadas no Git ou na conversa. O script verifica se banco, logins ou arquivos já existem e interrompe em caso de conflito. Se qualquer etapa falhar após iniciar alterações, inspecionar o estado antes de repetir.
 
@@ -28,17 +28,23 @@ O procedimento de banco cria `central_cobrancas_prod`, o schema `central_cobranc
 - As cinco tabelas de negócio existentes têm suas chaves primárias e as cobranças referenciam somente as tabelas locais de clientes e projetos; não foram encontrados gatilhos de usuário nessas tabelas. A inspeção foi somente de metadados.
 - Os fluxos originais de homologação estão limitados ao projeto `teste` e ao receptor de teste. Nas cópias de produção, os destinos são lidos do cadastro do serviço; o token de notificação é individual e enviado no cabeçalho `X-Notificacao-Token`. O token é apresentado uma vez pelo Pay ao criar ou trocar a chave de serviço; a troca invalida ambos. Serviços sem URL ou desativados não recebem notificações. A entrega ponta a ponta ainda precisa ser validada.
 - A derivação do token individual foi conferida entre PHP e PostgreSQL. Para proteger esse token, as cópias de recebimento e reenvio não persistem dados das execuções no n8n; o painel de webhooks continua usando os registros operacionais do PostgreSQL.
-- A imagem `pay360bh-production:0b9d4a0` foi construída na VPS e a conexão da aplicação ao banco, às tabelas vazias e ao arquivo do token interno foi verificada em container temporário. A imagem deve ser reconstruída após a inclusão do token individual no painel.
+- A stack Portainer `pay360bh-prod` usa a imagem `pay360bh-production:8f8c5f0`. O domínio `pay.360bh.com.br` atende com certificado HTTPS válido; `/health`, login e acesso autenticado ao painel foram verificados.
 - A criação inicial de um rascunho de produção no n8n associou automaticamente credenciais de outros serviços. O rascunho permaneceu inativo e foi arquivado; as cópias finais devem ter as credenciais de produção atribuídas e conferidas explicitamente antes da publicação.
 - O validador apontou avisos de credencial genérica HTTP nas definições preliminares. Elas devem reutilizar as credenciais corretas já criadas, por ID, e não criar credenciais automáticas de tipo genérico.
 
 ## Pendências para implantação
 
-1. Confirmar índices de unicidade e testar restauração de backup do banco de produção.
-2. Manter as credenciais independentes de produção no n8n. Nunca registrar seus valores no repositório.
-3. Testar as sete cópias inativas e confirmar as credenciais de produção antes da publicação.
-4. Validar a entrega aos destinos cadastrados por serviço, inclusive autenticação, repetição e recuperação. As cópias usam URL e token individuais, sem destino fixo de teste.
-5. Construir uma imagem de produção com `Dockerfile.production`, preencher as variáveis do Compose e testar a stack independente. Criar uma senha administrativa própria e forte para produção.
-6. Configurar o webhook de produção no Asaas, verificar backup e restauração e realizar a troca do domínio com plano de retorno. Fazer cobrança real controlada e conferir evento, estado e entrega de ponta a ponta.
+1. Fazer uma cobrança real controlada e confirmar estado, evento e entrega ao serviço ponta a ponta.
+2. Validar baixa, cancelamento e recuperação de falhas no ambiente efetivamente utilizado antes da operação comercial.
+3. Configurar backup recorrente externo e planejar a atualização do PostgreSQL compartilhado, que apresenta aviso de compatibilidade do n8n.
+4. Manter as credenciais independentes e nunca registrar seus valores no repositório.
 
-O banco de homologação, o banco original do NocoDB e o Pay legado continuam como fontes para investigação e recuperação; a tabela legada de usuários não integra a produção.
+## Implantação e validação de produção
+
+- Os sete fluxos separados de produção foram publicados no n8n, com credenciais próprias. O webhook Asaas `Pay 360BH Producao` foi criado e ativado em `https://hook.360bh.com.br/webhook/asaas-avisos-producao-v1`; o webhook preexistente `Automação 360` foi preservado.
+- Eventos de cobranças que não pertencem à Central são marcados como ignorados. Entregas foram testadas com receptor e registros sintéticos: token incorreto manteve a entrega pendente, token correto permitiu envio e reexecução não duplicou a entrega. Os dados de teste foram removidos e as cinco tabelas de negócio estavam vazias após a limpeza.
+- Backup inicial: `/opt/360bh/backups/central_cobrancas_prod_inicial.dump`, SHA-256 `f1795f4604dc4f6d9c27c1f560cb7875332fdf1cbbbc22b082de882d96feb99d`. Uma restauração em banco temporário terminou sem erro; o banco temporário foi removido. Configurar também uma rotina recorrente de backup externo e testar restaurações periodicamente.
+- A senha administrativa inicial foi gerada no VPS em arquivo restrito `/opt/360bh/secrets/pay360bh_prod_admin_password`. Entregar por canal privado e remover o arquivo após confirmar o acesso. A chave SSH permanece no caminho documentado acima, nunca no repositório.
+- Falta cadastrar um serviço, gerar e pagar uma cobrança real controlada, conferir a notificação recebida e entregue, validar baixa e cancelamento e revisar os processos de recuperação antes do uso comercial. A versão PostgreSQL 14 usada pela infraestrutura compartilhada apresenta aviso de compatibilidade do n8n; planejar atualização com backup e avaliação dos demais serviços.
+
+O banco de homologação, o banco original do NocoDB e o Pay legado continuam preservados; a tabela legada de usuários não integra a produção.
