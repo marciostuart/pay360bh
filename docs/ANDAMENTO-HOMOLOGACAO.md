@@ -61,7 +61,7 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 - A tela de logs agora tem duas abas mutuamente exclusivas: eventos recebidos do Asaas e notificações enviadas aos serviços. Os filtros atualizam somente a lista da aba selecionada.
 - Detalhes de cobranças que não estão pendentes ocultam QR Code e Pix copia e cola e mostram informações complementares.
 - O workflow Sandbox grava explicitamente `created_at` ao registrar eventos Asaas e entregas aos serviços. A versão ativa foi publicada no n8n; o ajuste vale para novos registros, sem preencher horários históricos ausentes.
-- Código do Pay ainda precisa ser publicado na imagem nova do Portainer e validado na homologação.
+- Commit 751eb0f atualiza o Pay e o Compose aponta para pay360bh-homolog:paylogs-webhook-751eb0f. Construir essa imagem no Portainer e redeployar sem Pull images; a tag anterior continua disponível para rollback.
 
 
 ## Atualizacao: acoes do painel (2026-11-02)
@@ -83,10 +83,10 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 - A tabela de cobrancas recebeu larguras de coluna estaveis, acoes em uma linha e alinhamento vertical central, seguindo o padrao aplicado na tabela de servicos.
 - Limitacao registrada: o schema atual de `Entregas SANDBOX` guarda situacao e claim, mas nao guarda codigo HTTP nem resposta de erro do destino. A tela informa essa limitacao; capturar esses dados e uma melhoria posterior do fluxo de entrega.
 - Proximo ajuste visual enfileirado: nos detalhes de cobrancas com status diferente de pendente, ocultar QR Code e Pix copia e cola e exibir datas e demais informacoes complementares disponiveis.
-- Commit `a14c254` foi publicado em `main`. O Compose agora referencia `pay360bh-homolog:webhook-logs-a14c254`; a imagem ainda precisa ser construida em Portainer > Images > Build image usando `https://github.com/marciostuart/pay360bh.git`, nome/tag `pay360bh-homolog:webhook-logs-a14c254`, e entao a stack deve ser redeployada sem Pull images. Manter `service-row-aligned-v1` disponivel como rollback.
+- Commit `a14c254` foi publicado em `main`. O Compose agora referencia `pay360bh-homolog:paylogs-webhook-751eb0f`; a imagem ainda precisa ser construida em Portainer > Images > Build image usando `https://github.com/marciostuart/pay360bh.git`, nome/tag `pay360bh-homolog:paylogs-webhook-751eb0f`, e entao a stack deve ser redeployada sem Pull images. Manter `service-row-aligned-v1` disponivel como rollback.
 ## Atualização de interface e horários dos webhooks (2026-11-02)
 
 - A tela de logs agora tem duas abas mutuamente exclusivas: eventos recebidos do Asaas e notificações enviadas aos serviços. Os filtros atualizam somente a lista da aba selecionada.
 - Detalhes de cobranças que não estão pendentes ocultam QR Code e Pix copia e cola e mostram informações complementares.
 - O workflow Sandbox grava explicitamente created_at ao registrar eventos Asaas e entregas aos serviços. A versão ativa foi publicada no n8n; o ajuste vale para novos registros, sem preencher horários históricos ausentes.
-- Código do Pay ainda precisa ser publicado na imagem nova do Portainer e validado na homologação.
+- Commit 751eb0f atualiza o Pay e o Compose aponta para pay360bh-homolog:paylogs-webhook-751eb0f. Construir essa imagem no Portainer e redeployar sem Pull images; a tag anterior continua disponível para rollback.
