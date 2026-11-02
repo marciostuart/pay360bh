@@ -5,7 +5,7 @@ require dirname(__DIR__) . '/bootstrap/app.php';
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: same-origin');
 header('X-Frame-Options: DENY');
-header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'");
+header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'; img-src 'self' data:");
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
