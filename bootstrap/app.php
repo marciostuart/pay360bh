@@ -178,7 +178,8 @@ function cents_from_brl(string $amount): int
     $amount = trim($amount);
     if (!preg_match('/^(\d{1,7})(?:[,.](\d{1,2}))?$/', $amount, $parts)) throw new InvalidArgumentException('Informe o valor em reais, por exemplo 10,00.');
     $cents = ((int)$parts[1] * 100) + (int)str_pad($parts[2] ?? '', 2, '0');
-    if ($cents < 100 || $cents > 100000000) throw new InvalidArgumentException('O valor deve estar entre R$ 1,00 e R$ 1.000.000,00.');
+    $minimum = envv('APP_ENV', '') === 'production' ? 500 : 100;
+    if ($cents < $minimum || $cents > 100000000) throw new InvalidArgumentException('O valor deve estar entre ' . money($minimum) . ' e R$ 1.000.000,00.');
     return $cents;
 }
 
@@ -255,7 +256,8 @@ function create_charge(array $service, array $input): array
     if ($name === '' || strlen($name) > 160) throw new InvalidArgumentException('Informe o nome do cliente (até 160 caracteres).');
     if (!valid_br_document($document)) throw new InvalidArgumentException('CPF/CNPJ inválido.');
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('E-mail inválido.');
-    if ($amount === false || $amount < 100 || $amount > 100000000) throw new InvalidArgumentException('Valor inválido. Informe o valor em centavos (mínimo R$ 1,00).');
+    $minimum = envv('APP_ENV', '') === 'production' ? 500 : 100;
+    if ($amount === false || $amount < $minimum || $amount > 100000000) throw new InvalidArgumentException('Valor inválido. O mínimo é ' . money($minimum) . '.');
     if ($reference === '' || strlen($reference) > 100) throw new InvalidArgumentException('Referência obrigatória (até 100 caracteres).');
     $date = DateTimeImmutable::createFromFormat('!Y-m-d', $due);
     if (!$date || $date->format('Y-m-d') !== $due) throw new InvalidArgumentException('Vencimento deve usar o formato AAAA-MM-DD.');
