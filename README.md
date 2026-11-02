@@ -6,10 +6,10 @@ Aplicação PHP para administrar serviços, clientes compartilhados e cobranças
 
 - Repositório: `https://github.com/marciostuart/pay360bh.git` (branch `main`).
 - O ponto de partida foi copiado do Pay legado sem `.env`, chaves, credenciais ou arquivos de dados; o legado continua intacto para rollback.
-- Foi feito backup verificável do banco atual do NocoDB em `/root/backups/central-cobrancas/`.
-- Cinco tabelas de negócio Sandbox foram copiadas para `central_cobrancas_sandbox`; os registros originais permanecem no banco `nocodb`.
+- Foi feito backup verificável dos bancos de origem e destino em `/root/backups/central-cobrancas/`.
+- Os dados da Central foram consolidados no PostgreSQL dedicado `central_cobrancas_sandbox`; o banco original `nocodb` foi preservado para rollback.
 - A migração é aditiva e cria campos para chaves individuais dos serviços e para o vínculo local cliente/projeto/cobrança.
-- A stack do Pay, o NocoDB e os fluxos n8n ainda precisam ser ligados à nova base e homologados juntos. O DNS oficial permanece inalterado.
+- O Pay e os nós de dados do workflow Sandbox usam o PostgreSQL dedicado. O workflow não contém mais nós NocoDB; o DNS oficial e o banco original permanecem inalterados.
 
 O registro de continuidade e o checklist de homologação estão em [`docs/ANDAMENTO-HOMOLOGACAO.md`](docs/ANDAMENTO-HOMOLOGACAO.md).
 
@@ -24,10 +24,10 @@ Operador ── HTTPS/Traefik ── Pay 360BH ─── PostgreSQL privado
                                    ▼              │
                                   n8n ── Asaas Sandbox
 
-NocoDB ── fonte PostgreSQL externa para administração
+NocoDB legado ── preservado para rollback, fora do fluxo operacional da Central
 ```
 
-O schema `pvfbh8yqws2olzw` mantém os nomes físicos conhecidos pelos fluxos: `Projetos SANDBOX`, `Clientes MDI`, `Cobrancas SANDBOX`, `Eventos Asaas SANDBOX` e `Entregas SANDBOX`. A tabela de usuários do NocoDB e a tabela Sandbox antiga não foram copiadas.
+O schema `pvfbh8yqws2olzw` mantém os nomes físicos usados pelo painel e pelo n8n: `Projetos SANDBOX`, `Clientes MDI`, `Cobrancas SANDBOX`, `Eventos Asaas SANDBOX` e `Entregas SANDBOX`. Os dois clientes da tabela antiga da Central foram reconciliados com `Clientes MDI`. Os hashes de senha da tabela legada `usuarios` foram arquivados em `public.usuarios_legado_nocodb`, sem acesso para Pay ou n8n. Tabelas internas e dados de outros projetos do NocoDB não foram migrados.
 
 ## O painel
 
@@ -83,9 +83,9 @@ Não use `pay.360bh.com.br` no teste inicial se o domínio ainda servir o legado
 
 ## PostgreSQL, papéis e acesso
 
-`database/migrations/001_central_sandbox_postgres.sql` adiciona colunas e índices sem apagar dados. Os papéis `central_pay_data`, `central_n8n_data` e `central_nocodb_data` são grupos `NOLOGIN` com permissões separadas. O script `ops/provision-pay-db-login.sh` cria um usuário `LOGIN` restrito para o Pay e guarda a senha em arquivo protegido no VPS. Crie credenciais distintas para n8n e NocoDB; não reutilize a credencial da aplicação NocoDB interna.
+`database/migrations/001_central_sandbox_postgres.sql` adiciona colunas e índices sem apagar dados. Os papéis `central_pay_data`, `central_n8n_data` e `central_nocodb_data` são grupos `NOLOGIN` com permissões separadas. O script `ops/provision-pay-db-login.sh` cria um usuário `LOGIN` restrito para o Pay e guarda a senha em arquivo protegido no VPS. O n8n usa a credencial `Central Cobranças Sandbox`, com acesso somente às tabelas operacionais; a conta não pode ler `usuarios_legado_nocodb`. O NocoDB não acessa a base dedicada da Central.
 
-Conecte o NocoDB como fonte externa ao banco dedicado, com edição de schema desativada. O n8n deve usar seu usuário próprio e os nós de banco que leem/escrevem na nova base. Só remova ou arquive a antiga fonte após a homologação completa e backup.
+O workflow Sandbox usa a credencial PostgreSQL `Central Cobranças Sandbox` e os nós de dados consultam/gravam diretamente na base dedicada. A conta `central_cobrancas_sandbox` recebeu somente uso do schema e leitura/escrita operacional nas tabelas de trabalho, leitura de projetos e uso das sequences; não tem acesso ao arquivo de usuários legado. O NocoDB original continua preservado, mas não é dependência operacional da Central.
 
 ## Rollback e operação
 

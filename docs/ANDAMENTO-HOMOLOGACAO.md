@@ -1,12 +1,12 @@
-# Andamento da Central de Cobranças — 2026-11-01
+# Andamento da Central de Cobranças — 2026-11-02
 
 Este documento registra o ponto de parada desta sessão para retomarmos sem repetir etapas. É um retrato do ambiente Sandbox; não significa que a Central esteja pronta para produção.
 
 ## Decisões e escopo vigentes
 
-- O painel Pay será desenvolvido neste repositório e implantado no VPS por uma Stack Git do Portainer, atrás do Traefik.
+- O painel Pay é desenvolvido neste repositório e implantado no VPS por uma Stack Git do Portainer, atrás do Traefik.
 - O subdomínio de homologação `pay-homolog.360bh.com.br` resolve publicamente para `187.41.108.26`. O domínio oficial `pay.360bh.com.br` continua fora da migração e o Pay legado permanece disponível para rollback.
-- A fonte de verdade planejada é o banco PostgreSQL dedicado `central_cobrancas_sandbox`; NocoDB será a interface de administração e o n8n será o processador de pagamentos/notificações Asaas.
+- A fonte de verdade é o banco PostgreSQL dedicado `central_cobrancas_sandbox`; o Pay é a interface de administração e o n8n processa pagamentos/notificações Asaas. NocoDB não é dependência operacional.
 - O gateway permanece em Asaas Sandbox. Cancelamentos e estornos estão fora do MVP atual.
 - Não colocar senha, token, chave de API ou conteúdo de arquivo secreto no Git ou no chat.
 
@@ -15,7 +15,10 @@ Este documento registra o ponto de parada desta sessão para retomarmos sem repe
 ### Banco e segurança
 
 - Foi feito backup verificável do banco anterior do NocoDB em `/root/backups/central-cobrancas/`; a fonte original não foi apagada.
-- As cinco tabelas de negócio Sandbox foram copiadas ao banco dedicado e comparadas com a origem. A conta interna do NocoDB e a tabela Sandbox antiga não foram copiadas.
+- As tabelas de negócio da Central foram consolidadas no banco dedicado. Os registros originais continuam no banco `nocodb`; dados internos do NocoDB e de outros projetos não foram migrados.
+- Os dois registros da antiga tabela `Central de Cobrança SANDBOX` foram reconciliados com `Clientes MDI` por documento, preservando os cadastros existentes. A tabela `usuarios` foi arquivada como `public.usuarios_legado_nocodb`, sem permissão de leitura para Pay/n8n.
+- A cobrança Sandbox `teste-paga-veiaca` foi migrada e vinculada ao cliente local e ao projeto `teste`; o cliente local agora contém o ID de cliente Asaas. O status financeiro foi preservado.
+- A conta PostgreSQL `central_cobrancas_sandbox` recebeu acesso operacional restrito ao schema da Central; não tem acesso ao arquivo legado de usuários.
 - A migração PostgreSQL do Pay é aditiva. Há índices únicos no PostgreSQL para chave de pedido, identificador de evento e chave de entrega; a marca `UN` do NocoDB, sozinha, não garante unicidade.
 - Os grupos de permissão de Pay, n8n e NocoDB são separados. O login restrito `pay360bh_login` foi provisionado sem permissão para alterar o status financeiro das cobranças.
 - A senha do banco do Pay está guardada no VPS em `/opt/360bh/secrets/pay360bh_db_password`, com acesso restrito, e o Compose monta o arquivo somente leitura. Nenhuma senha foi adicionada ao repositório.
@@ -28,29 +31,27 @@ Este documento registra o ponto de parada desta sessão para retomarmos sem repe
 - O percurso de entrega de notificações de teste foi executado com sucesso depois de corrigir o nome do cabeçalho HTTP. A reserva/claim evita que execuções concorrentes enviem a mesma entrega.
 - A criação repetida de uma chave de pedido encontrou a restrição única PostgreSQL (`23505`), confirmando a proteção no banco. O tratamento amigável de repetição no fluxo e o retorno da cobrança já existente ainda precisam do teste final de ponta a ponta.
 - O fluxo de produção anterior não foi alterado.
+- Os 15 nós NocoDB do workflow Sandbox foram substituídos por consultas PostgreSQL com os mesmos nomes e conexões. A nova versão foi publicada em 2026-11-02; o workflow ativo continua no Sandbox.
+- Backups pré-migração foram verificados por SHA-256 e formato `pg_restore`: `/root/backups/central-cobrancas/nocodb-before-central-migration-20261102T164013Z.dump` e `/root/backups/central-cobrancas/central-before-nocodb-sync-20261102T164013Z.dump`. O banco `nocodb` não foi alterado.
 
 ### Painel Pay e implantação
 
 - O repositório é `https://github.com/marciostuart/pay360bh.git`, branch `main`. A última revisão local conferida é `2fcb700` (`Provision Pay database credential securely`).
 - O painel contempla login administrativo, cadastro de serviços com chave individual exibida uma vez, cadastro compartilhado de clientes e emissão/consulta de cobranças manuais pelo n8n.
-- `compose.portainer.yml` está configurado para construir a aplicação a partir do repositório, usar a rede externa `360Network` e publicar via Traefik/HTTPS. Não publica a porta do PostgreSQL.
-- A sintaxe PHP e a configuração Compose tiveram validações anteriores. A Stack Pay ainda **não foi criada nem implantada**.
-- Todos os repositórios GitHub foram tornados privados. Ainda não foi criado token GitHub nem credencial Git no Portainer. O procedimento combinado é usar um token fine-grained restrito ao repositório `pay360bh`, com `Contents: Read-only`, guardado como credencial Git no Portainer. Não enviar o token pelo chat.
-- A tentativa de conexão MCP ao Portainer não foi configurada. Isso não bloqueia a criação manual da Stack.
+- `compose.portainer.yml` está implantado na Stack `pay360bh-homolog`, usando a rede externa `360Network` e Traefik/HTTPS. A aplicação está acessível em `pay-homolog.360bh.com.br`; login foi validado.
+- O repositório `https://github.com/marciostuart/pay360bh` está público no momento e conectado à Stack Git do Portainer. O serviço está rodando; a porta do PostgreSQL não é publicada.
 
 ## Próximos passos — nesta ordem
 
-- [ ] Criar no GitHub um token fine-grained com acesso somente a `pay360bh` e conteúdo somente para leitura; guardá-lo em local seguro.
-- [ ] No Portainer, criar/salvar uma credencial Git com esse usuário e token. Criar a Stack `pay360bh-homolog` a partir do repositório, branch `main`, arquivo `compose.portainer.yml`.
-- [ ] Preencher as variáveis da Stack diretamente no Portainer: `PAY_HOST`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH_B64` (hash bcrypt codificado em Base64), `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. Usar o host de homologação, nunca o domínio oficial nesta fase. Gerar o hash localmente; não usar a senha administrativa em texto puro.
-- [ ] Para `CENTRAL_N8N_PAYMENT_WEBHOOK_URL`, usar o webhook de produção do workflow Sandbox: `https://automacao.360bh.com.br/webhook/central-cobrancas-sandbox-v1`. Configurar `CENTRAL_N8N_TOKEN` com o mesmo segredo esperado pela autenticação `x-central-token` do webhook; inserir o valor somente no Portainer.
-- [ ] Conferir se o ambiente do Portainer é Docker Standalone ou Swarm antes de implantar, pois o Compose usa `build:`. Se for Swarm, preparar a imagem em registry compatível antes da Stack.
-- [ ] Implantar e verificar container, logs, HTTPS/Traefik, `/health`, login e conexão ao banco; corrigir antes de conectar usuários.
-- [ ] Criar credenciais PostgreSQL próprias para n8n e NocoDB e conectar ambos ao banco dedicado, mantendo o banco original intacto até concluir a homologação.
+- [x] `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN` estão configurados no ambiente Sandbox; os valores secretos permanecem no Portainer.
+- [x] A stack foi implantada no Portainer e está acessível via Traefik/HTTPS; o serviço não publica a porta do PostgreSQL.
+- [ ] Validar a nova versão publicada do workflow no Sandbox com uma chave de pedido nova e confirmar o registro no Pay/PostgreSQL, o Pix no Asaas e o retorno ao serviço.
+- [ ] Validar no Pay o cadastro/edição/desativação de clientes e serviços e a listagem de cobranças, inclusive o registro migrado `teste-paga-veiaca`.
+- [ ] Confirmar que webhook Asaas, conciliação, entrega/notificação e recuperação pendente funcionam após a troca dos nós NocoDB por PostgreSQL.
 - [ ] Validar no Sandbox, de ponta a ponta: serviço autorizado e isolamento de chave; cliente compartilhado; cobrança manual/API; Pix no Asaas; webhook autenticado; atualização do mesmo registro; notificações; reenvio após falha; evento duplicado; chave de pedido repetida; expiração e recuperação após indisponibilidade/reinício.
 - [ ] Exportar os workflows n8n em JSON, revisar e remover qualquer dado sensível antes de guardá-los no repositório para recuperação por Git.
 - [ ] Só depois da homologação aprovada planejar a troca do domínio oficial e a transição gradual; manter Pay legado, banco original e rollback disponíveis até lá.
 
 ## Como retomar
 
-Retomar pelo primeiro item pendente: criar o token fine-grained restrito ao repositório e cadastrar a credencial Git no Portainer. O token deve ser colado apenas no campo de credencial do Portainer, nunca nesta conversa.
+Retomar pela validação ponta a ponta da versão publicada do workflow e do painel com registros no PostgreSQL dedicado. O banco `nocodb` e os backups permanecem disponíveis para rollback durante a homologação.
