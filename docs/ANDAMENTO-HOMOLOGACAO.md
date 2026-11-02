@@ -78,6 +78,7 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 ### Limites e validacoes ainda pendentes
 
 - [x] Validacao visual confirmada pelo operador: QR Pix aparece em cobranca pendente e fica oculto apos pagamento; horario de criacao tambem confirmado.
+- [x] Testes negativos de autenticacao: chamadas com token invalido ao endpoint de criacao e ao receptor de eventos Asaas foram rejeitadas com HTTP 403.
 - [ ] Revisao funcional pelo operador das telas de cadastro/edicao de clientes e servicos e das acoes manuais de cobranca.
 - [x] Repeticao controlada confirmada em 2026-11-02: duas chamadas identicas para a mesma chave `teste:idempotencia-20261102-175429` retornaram o mesmo ID Asaas; a segunda foi reconhecida como `pedido_existente`. A cobranca Sandbox permaneceu `PENDING`.
 - [ ] Antes de producao: provisionar configuracao isolada e credenciais de producao do Asaas, registrar o webhook de producao, definir dominio/stack/segredos de producao e validar backup, restauracao e rollback.
