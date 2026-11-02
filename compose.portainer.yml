@@ -1,6 +1,6 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:service-table-stable-v1
+    image: pay360bh-homolog:service-row-aligned-v1
     restart: unless-stopped
     environment:
       APP_ENV: homolog

@@ -371,7 +371,7 @@ if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer[
                     <td><?=esc($p['nome'])?></td>
                     <td><?php if ($editingProjectUrlId === (int)$p['id']): ?><input class="service-url-input" type="url" name="url_notificacao" form="salvar-url-<?=esc($p['id'])?>" maxlength="2000" value="<?=esc($p['url_notificacao'] ?? '')?>" placeholder="https://servico.exemplo/webhook/pagamento"><?php else: ?><code><?=esc($p['url_notificacao'] ?: '-')?></code><?php endif; ?></td>
                     <td><span class="pill <?=$p['ativo'] ? 'good' : 'off'?>"><?=$p['ativo'] ? 'Ativo' : 'Inativo'?></span></td>
-                    <td class="row-actions">
+                    <td class="service-actions-cell"><div class="row-actions">
                         <?php if ($editingProjectUrlId === (int)$p['id']): ?>
                             <form method="post" id="salvar-url-<?=esc($p['id'])?>">
                                 <input type="hidden" name="_csrf" value="<?=esc($csrf)?>">
@@ -385,7 +385,7 @@ if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer[
                         <?php endif; ?>
                         <form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="toggle_project"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small"><?=$p['ativo'] ? 'Desativar' : 'Ativar'?></button></form>
                         <?php if ($p['ativo']): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="rotate_project_key"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small">Trocar chave</button></form><?php endif; ?>
-                    </td>
+                    </div></td>
                 </tr>
             <?php endforeach; ?>
             <?php if (!$projects): ?><tr><td colspan="5">Nenhum servico cadastrado.</td></tr><?php endif; ?>
