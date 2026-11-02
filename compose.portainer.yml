@@ -1,6 +1,6 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:admin-actions-v1
+    image: pay360bh-homolog:pix-qr-v2
     restart: unless-stopped
     environment:
       APP_ENV: homolog
