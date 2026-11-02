@@ -1,6 +1,6 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:service-actions-v1
+    image: pay360bh-homolog:service-url-inline-v1
     restart: unless-stopped
     environment:
       APP_ENV: homolog
