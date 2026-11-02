@@ -69,3 +69,11 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 
 
 - Para publicar a versao com acoes sem sobrescrever a imagem atual, o Compose aponta para a tag nova `pay360bh-homolog:admin-actions-v1`. Construir essa imagem pelo menu Images do Portainer usando o repositorio publico e depois atualizar a Stack sem Pull images. A tag antiga `clientes-servicos-v1` permanece disponivel para rollback.
+
+## Ajustes em andamento — 2026-11-02
+
+- Criada a aba Sandbox `Logs de webhooks` no Pay, com filtros por servico, referencia/IDs, estado de processamento/entrega e periodo; mostra eventos recebidos do Asaas e entregas registradas para os servicos.
+- A tabela de cobrancas recebeu larguras de coluna estaveis, acoes em uma linha e alinhamento vertical central, seguindo o padrao aplicado na tabela de servicos.
+- Limitacao registrada: o schema atual de `Entregas SANDBOX` guarda situacao e claim, mas nao guarda codigo HTTP nem resposta de erro do destino. A tela informa essa limitacao; capturar esses dados e uma melhoria posterior do fluxo de entrega.
+- Proximo ajuste visual enfileirado: nos detalhes de cobrancas com status diferente de pendente, ocultar QR Code e Pix copia e cola e exibir datas e demais informacoes complementares disponiveis.
+- Codigo local ainda precisa ser publicado no GitHub e a nova imagem precisa ser construida/deployada no Portainer para validar a tela no Sandbox.
