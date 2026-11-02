@@ -173,6 +173,38 @@ function notify_payment_workflow(array $payload): array
     return is_array($decoded) ? $decoded : ['resposta' => $response];
 }
 
+function notify_charge_admin_action(array $payload): array
+{
+    $url = (string)envv('CENTRAL_N8N_ADMIN_ACTION_WEBHOOK_URL', '');
+    $token = (string)envv('CENTRAL_N8N_TOKEN', '');
+    if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://') || $token === '') {
+        throw new RuntimeException('A integração segura de ações de cobrança não está configurada.');
+    }
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-central-token: ' . $token],
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+    ]);
+    $response = curl_exec($curl);
+    $error = curl_error($curl);
+    $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+    curl_close($curl);
+    if ($response === false) throw new RuntimeException('Não foi possível contatar o n8n: ' . $error);
+    $decoded = json_decode($response, true);
+    if ($status < 200 || $status >= 300) {
+        $message = is_array($decoded) ? (string)($decoded['error'] ?? $decoded['message'] ?? '') : '';
+        throw new RuntimeException($message !== '' ? $message : 'O n8n recusou a ação (HTTP ' . $status . ').');
+    }
+    if (!is_array($decoded) || ($decoded['ok'] ?? $decoded['success'] ?? false) !== true) {
+        throw new RuntimeException('O n8n não confirmou a ação da cobrança. Consulte o histórico antes de tentar novamente.');
+    }
+    return $decoded;
+}
+
 function create_charge(array $service, array $input): array
 {
     $name = trim((string)($input['nome'] ?? $input['name'] ?? ''));

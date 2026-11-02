@@ -57,7 +57,7 @@ if (empty($_SESSION['admin_authenticated'])) {
         header('Location: /login', true, 303);
         exit;
     }
-    if ($path !== '/login' && $path !== '/' && !preg_match('#^/clientes/(novo|[0-9]+/editar)$#', $path)) { http_response_code(404); exit('Pagina nao encontrada.'); }
+    if ($path !== '/login' && $path !== '/' && !preg_match('#^/clientes/(novo|[0-9]+/editar)$#', $path) && !preg_match('#^/cobrancas/[0-9]+$#', $path)) { http_response_code(404); exit('Pagina nao encontrada.'); }
     $flash = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
     ?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Entrar | Pay 360BH</title><link rel="stylesheet" href="/assets/panel.css"></head><body class="login"><main class="login-card"><div class="brand">360BH <span>Central de Cobranças</span></div><h1>Acessar painel</h1><?php if ($flash): ?><div class="notice error"><?=esc($flash['message'])?></div><?php endif; ?><form method="post" action="/login"><input type="hidden" name="_csrf" value="<?=esc(csrf_token())?>"><label>E-mail<input type="email" name="email" autocomplete="username" required></label><label>Senha<input type="password" name="password" autocomplete="current-password" required></label><button class="button primary">Entrar</button></form></main></body></html><?php exit;
@@ -69,6 +69,14 @@ $pdo = db();
 $toBool = static fn(mixed $value): bool => in_array($value, [true, 1, '1', 't', 'true'], true);
 $customerRoute = $path === '/clientes/novo' ? 'new' : (preg_match('#^/clientes/([0-9]+)/editar$#', $path, $routeMatch) ? 'edit' : null);
 $routeCustomerId = $customerRoute === 'edit' ? (int)$routeMatch[1] : null;
+$chargeRoute = preg_match('#^/cobrancas/([0-9]+)$#', $path, $chargeMatch) ? (int)$chargeMatch[1] : null;
+$chargeDetail = null;
+if ($chargeRoute !== null) {
+    $detailStmt = $pdo->prepare('SELECT c.*, p.nome AS projeto_nome, cl.nome AS cliente_nome, cl.email AS cliente_email FROM "Cobrancas SANDBOX" c LEFT JOIN "Projetos SANDBOX" p ON p.id = c.projeto_id LEFT JOIN "Clientes MDI" cl ON cl.id = c.cliente_local_id WHERE c.id = :id');
+    $detailStmt->execute(['id' => $chargeRoute]);
+    $chargeDetail = $detailStmt->fetch();
+    if (!$chargeDetail) { http_response_code(404); exit('Cobranca nao encontrada.'); }
+}
 $editingCustomer = null;
 if ($customerRoute === 'edit') {
     $customerStmt = $pdo->prepare('SELECT * FROM "Clientes MDI" WHERE id = :id');
@@ -83,7 +91,7 @@ $customerForm = $_SESSION['customer_form'] ?? [];
 unset($_SESSION['customer_form']);
 $issuedKey = $_SESSION['issued_service_key'] ?? null;
 unset($_SESSION['issued_service_key']);
-$activeTab = in_array($_GET['aba'] ?? '', ['resumo', 'servicos', 'clientes', 'cobrancas'], true) ? (string)$_GET['aba'] : 'resumo';
+$activeTab = $chargeDetail ? 'charge_detail' : (in_array($_GET['aba'] ?? '', ['resumo', 'servicos', 'clientes', 'cobrancas'], true) ? (string)$_GET['aba'] : 'resumo');
 
 if ($method === 'POST') {
     csrf_check();
@@ -211,11 +219,37 @@ if ($method === 'POST') {
             $chargeId = $idQuery->fetchColumn();
             if ($chargeId) {
                 $url = find_invoice_url($answer);
-                $pdo->prepare('UPDATE "Cobrancas SANDBOX" SET cliente_local_id = :customer, projeto_id = :project, descricao = :description, invoice_url = COALESCE(:url, invoice_url), origem = :origin WHERE id = :id')
-                    ->execute(['customer' => $customer['id'], 'project' => $project['id'], 'description' => trim((string)($_POST['descricao'] ?? '')) ?: null, 'url' => $url, 'origin' => 'painel', 'id' => $chargeId]);
+                $pix = find_pix_data($answer);
+                $pdo->prepare('UPDATE "Cobrancas SANDBOX" SET cliente_local_id = :customer, projeto_id = :project, descricao = :description, invoice_url = COALESCE(:url, invoice_url), pix_payload = COALESCE(:payload, pix_payload), pix_encoded_image = COALESCE(:image, pix_encoded_image), origem = :origin WHERE id = :id')
+                    ->execute(['customer' => $customer['id'], 'project' => $project['id'], 'description' => trim((string)($_POST['descricao'] ?? '')) ?: null, 'url' => $url, 'payload' => $pix['payload'], 'image' => $pix['image'], 'origin' => 'painel', 'id' => $chargeId]);
+                $_SESSION['flash'] = ['type' => 'success', 'message' => 'Cobrança criada no Asaas e salva na Central. Confira os dados abaixo.'];
+                header('Location: /cobrancas/' . (int)$chargeId, true, 303); exit;
             }
-            $_SESSION['flash'] = ['type' => 'success', 'message' => 'Solicitação enviada ao n8n. Resultado: ' . json_encode($answer, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)];
+            $_SESSION['flash'] = ['type' => 'warning', 'message' => 'O n8n respondeu, mas a cobrança ainda não apareceu no banco local. Não envie novamente; confira a lista e o histórico do n8n.'];
             header('Location: /painel?aba=cobrancas', true, 303); exit;
+        }
+        if ($action === 'receive_charge' || $action === 'cancel_charge') {
+            $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+            if (!$id) throw new InvalidArgumentException('Cobrança inválida.');
+            $chargeStmt = $pdo->prepare('SELECT id, status, valor_centavos, cobranca_asaas_id, chave_pedido FROM "Cobrancas SANDBOX" WHERE id = :id');
+            $chargeStmt->execute(['id' => $id]);
+            $charge = $chargeStmt->fetch();
+            if (!$charge || !preg_match('/^pay_[A-Za-z0-9]+$/', (string)$charge['cobranca_asaas_id'])) throw new InvalidArgumentException('A cobrança não tem um ID Asaas válido.');
+            if (!in_array(strtoupper((string)$charge['status']), ['PENDING', 'PENDENTE', 'AWAITING_PAYMENT', 'OVERDUE', 'VENCIDA'], true)) throw new DomainException('Somente cobranças pendentes ou vencidas podem receber esta ação.');
+            $payload = ['action' => $action === 'receive_charge' ? 'receive_cash' : 'cancel', 'charge_id' => (int)$charge['id'], 'asaas_payment_id' => (string)$charge['cobranca_asaas_id'], 'order_key' => (string)$charge['chave_pedido']];
+            if ($action === 'receive_charge') {
+                $date = (string)($_POST['payment_date'] ?? '');
+                if ($date === '') $date = date('Y-m-d');
+                $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+                if (!$parsed || $parsed->format('Y-m-d') !== $date) throw new InvalidArgumentException('Informe uma data de recebimento válida.');
+                if (($_POST['confirm_receive'] ?? '') !== '1') throw new InvalidArgumentException('Confirme o recebimento integral por outro meio.');
+                $payload['payment_date'] = $date;
+            } elseif (($_POST['confirm_cancel'] ?? '') !== '1') {
+                throw new InvalidArgumentException('Confirme o cancelamento desta cobrança.');
+            }
+            notify_charge_admin_action($payload);
+            $_SESSION['flash'] = ['type' => 'success', 'message' => $action === 'receive_charge' ? 'Recebimento externo registrado no Asaas. O webhook atualizará o histórico.' : 'Cobrança cancelada no Asaas. O webhook atualizará o histórico.'];
+            header('Location: /cobrancas/' . (int)$id, true, 303); exit;
         }
         throw new InvalidArgumentException('Ação não reconhecida.');
     } catch (PDOException $e) {
@@ -242,6 +276,19 @@ function find_invoice_url(array $value): ?string
     return $walk($value);
 }
 
+function find_pix_data(array $value): array
+{
+    $found = ['payload' => null, 'image' => null];
+    $walk = static function (mixed $item) use (&$walk, &$found): void {
+        if (!is_array($item)) return;
+        foreach (['payload', 'pix_copia_cola'] as $key) if (isset($item[$key]) && is_string($item[$key]) && $item[$key] !== '') $found['payload'] = $item[$key];
+        foreach (['encodedImage', 'qr_code_base64'] as $key) if (isset($item[$key]) && is_string($item[$key]) && $item[$key] !== '') $found['image'] = preg_replace('#^data:image/[^;]+;base64,#', '', $item[$key]);
+        foreach ($item as $child) if (is_array($child)) $walk($child);
+    };
+    $walk($value);
+    return $found;
+}
+
 $projects = $pdo->query('SELECT id, codigo, nome, url_notificacao, ativo FROM "Projetos SANDBOX" ORDER BY nome')->fetchAll();
 foreach ($projects as &$project) $project['ativo'] = $toBool($project['ativo']);
 unset($project);
@@ -256,7 +303,7 @@ $counts = [
     'charges' => (int)$pdo->query('SELECT COUNT(*) FROM "Cobrancas SANDBOX"')->fetchColumn(),
     'pending' => (int)$pdo->query("SELECT COUNT(*) FROM \"Cobrancas SANDBOX\" WHERE upper(status) IN ('PENDING','PENDENTE','AWAITING_PAYMENT')")->fetchColumn(),
 ];
-$pageTitle = $customerRoute ? ($customerRoute === 'new' ? 'Novo cliente' : 'Editar cliente') : ['resumo'=>'Visao geral','servicos'=>'Servicos autorizados','clientes'=>'Clientes compartilhados','cobrancas'=>'Cobrancas'][$activeTab];
+$pageTitle = $chargeDetail ? 'Detalhes da cobrança' : ($customerRoute ? ($customerRoute === 'new' ? 'Novo cliente' : 'Editar cliente') : ['resumo'=>'Visao geral','servicos'=>'Servicos autorizados','clientes'=>'Clientes compartilhados','cobrancas'=>'Cobrancas'][$activeTab]);
 $csrf = csrf_token();
 $customerValue = static fn(string $key, string $default = ''): string => esc($customerForm[$key] ?? $editingCustomer[$key] ?? $default);
 $lastNoticeValue = array_key_exists('ultimo_aviso', $customerForm) ? (string)$customerForm['ultimo_aviso'] : '';
@@ -281,5 +328,12 @@ if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer[
 <?php elseif ($activeTab === 'resumo'): ?><section class="cards"><article><span>Serviços</span><strong><?=$counts['projects']?></strong></article><article><span>Clientes</span><strong><?=$counts['customers']?></strong></article><article><span>Cobranças</span><strong><?=$counts['charges']?></strong></article><article><span>Aguardando pagamento</span><strong><?=$counts['pending']?></strong></article></section><section class="panel"><h2>Como funciona</h2><p>Cadastre serviços e clientes aqui. Uma cobrança manual ou enviada por API segue para o n8n, que conversa com o Asaas Sandbox. O estado financeiro volta pelos webhooks e fica registrado no PostgreSQL.</p><p>Esta versão ainda está em homologação. Não use cobranças comerciais nem altere o DNS do domínio antes de completar a validação ponta a ponta.</p></section>
 <?php elseif ($activeTab === 'servicos'): ?><section class="panel"><h2>Cadastrar servico</h2><p>Cada servico recebe uma chave secreta exclusiva. Para chamar a API de cobrancas, envie-a no cabecalho <code>X-Service-Key</code>. O valor completo e mostrado apenas uma vez; so o hash fica no banco. A URL abaixo e o destino que recebera notificacoes de pagamento.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_project"><label>Codigo unico<input name="codigo" required maxlength="40" placeholder="ex.: hotspot-rural"></label><label>Nome do servico<input name="nome" required maxlength="160" placeholder="Hotspot Rural"></label><label class="wide">URL de destino para notificacoes (opcional)<input name="url_notificacao" type="url" placeholder="https://servico.exemplo/webhook/pagamento"></label><div class="wide"><button class="button primary">Cadastrar e gerar chave</button></div></form></section><section class="panel"><h2>Servicos cadastrados</h2><div class="table-wrap"><table><thead><tr><th>Codigo</th><th>Nome</th><th>Destino de notificacoes</th><th>Estado</th><th>Acoes</th></tr></thead><tbody><?php foreach ($projects as $p): ?><tr><td><code><?=esc($p['codigo'])?></code></td><td><?=esc($p['nome'])?></td><td><?=esc($p['url_notificacao'] ?: '-')?></td><td><span class="pill <?=$p['ativo'] ? 'good' : 'off'?>"><?=$p['ativo'] ? 'Ativo' : 'Inativo'?></span></td><td class="row-actions"><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="toggle_project"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small"><?=$p['ativo'] ? 'Desativar' : 'Ativar'?></button></form><?php if ($p['ativo']): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="rotate_project_key"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small">Trocar chave</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$projects): ?><tr><td colspan="5">Nenhum servico cadastrado.</td></tr><?php endif; ?></tbody></table></div></section>
 <?php elseif ($activeTab === 'clientes'): ?><section class="panel list-heading"><div><h2>Clientes</h2><p>Excluir desativa o cadastro e preserva as cobrancas e o historico financeiro.</p></div><a class="button primary" href="/clientes/novo">Adicionar cliente</a></section><section class="panel"><div class="table-wrap"><table><thead><tr><th>Nome / razao social</th><th>Documento</th><th>E-mail</th><th>Asaas</th><th>Situacao</th><th>Acoes</th></tr></thead><tbody><?php foreach ($customers as $c): ?><tr><td><?=esc($c['nome'] ?: '-')?></td><td><?=esc($c['cpf'] ?: $c['cnpj'] ?: '-')?></td><td><?=esc($c['email'] ?: '-')?></td><td><?=esc($c['asaas_id'] ?: 'Ainda nao vinculado')?></td><td><span class="pill <?=$c['ativo'] ? 'good' : 'off'?>"><?=$c['ativo'] ? 'Ativo' : 'Inativo'?></span></td><td class="row-actions"><a class="button small" href="/clientes/<?=esc($c['id'])?>/editar">Editar</a><?php if ($c['ativo']): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="deactivate_customer"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><button class="button small danger">Excluir</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$customers): ?><tr><td colspan="6">Nenhum cliente cadastrado.</td></tr><?php endif; ?></tbody></table></div></section>
-<?php else: ?><section class="panel"><h2>Gerar cobrança avulsa</h2><p>O painel envia a solicitação ao n8n. Uma nova referência deve ser usada para cada cobrança.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_charge"><label>Serviço<select name="projeto_id" required><option value="">Selecione</option><?php foreach ($projects as $p) if ($p['ativo']): ?><option value="<?=esc($p['id'])?>"><?=esc($p['nome'])?> (<?=esc($p['codigo'])?>)</option><?php endif; ?></select></label><label>Cliente<select name="cliente_id" required><option value="">Selecione</option><?php foreach ($activeCustomers as $c): ?><option value="<?=esc($c['id'])?>"><?=esc($c['nome'] ?: $c['cpf'] ?: $c['cnpj'])?> — <?=esc($c['email'])?></option><?php endforeach; ?></select></label><label>Referência única<input name="referencia" required maxlength="100" placeholder="pedido-2026-001"></label><label>Valor (R$)<input name="valor" required inputmode="decimal" placeholder="10,00"></label><label>Vencimento<input name="vencimento" type="date" required value="<?=date('Y-m-d')?>"></label><label>Descrição (opcional)<input name="descricao" maxlength="200"></label><div class="wide"><button class="button primary" <?=(!$projects || !$activeCustomers) ? 'disabled' : ''?>>Enviar ao n8n e gerar Pix</button></div></form></section><section class="panel"><h2>Últimas cobranças</h2><div class="table-wrap"><table><thead><tr><th>Serviço</th><th>Cliente</th><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Pagamento</th></tr></thead><tbody><?php foreach ($charges as $c): ?><tr><td><?=esc($c['projeto_nome'] ?: $c['projeto'])?></td><td><?=esc($c['cliente_nome'] ?: '—')?></td><td><?=esc($c['referencia'])?></td><td><?=esc(is_numeric($c['valor_centavos']) ? money((int)$c['valor_centavos']) : $c['valor_centavos'])?></td><td><?=esc($c['vencimento'])?></td><td><?=esc($c['status'])?></td><td><?php if ($c['invoice_url']): ?><a href="<?=esc($c['invoice_url'])?>" target="_blank" rel="noopener">Abrir</a><?php else: ?><?=esc($c['cobranca_asaas_id'] ?: '—')?><?php endif; ?></td></tr><?php endforeach; ?></tbody></table></div></section><?php endif; ?>
+<?php elseif ($chargeDetail): ?>
+<?php $canAct = in_array(strtoupper((string)$chargeDetail['status']), ['PENDING', 'PENDENTE', 'AWAITING_PAYMENT', 'OVERDUE', 'VENCIDA'], true) && preg_match('/^pay_[A-Za-z0-9]+$/', (string)$chargeDetail['cobranca_asaas_id']); ?>
+<section class="panel"><div class="list-heading"><div><h2><?=esc($chargeDetail['cliente_nome'] ?: 'Cliente')?> — <?=esc($chargeDetail['referencia'] ?: 'Cobrança')?></h2><p><?=esc($chargeDetail['projeto_nome'] ?: $chargeDetail['projeto'])?> — <?=esc($chargeDetail['cliente_email'] ?: '')?></p></div><a class="button" href="/painel?aba=cobrancas">Voltar às cobranças</a></div>
+<div class="detail-grid"><article><span>Valor</span><strong><?=esc(is_numeric($chargeDetail['valor_centavos']) ? money((int)$chargeDetail['valor_centavos']) : $chargeDetail['valor_centavos'])?></strong></article><article><span>Status</span><strong><?=esc($chargeDetail['status'])?></strong></article><article><span>Vencimento</span><strong><?=esc($chargeDetail['vencimento'] ?: '—')?></strong></article><article><span>ID Asaas</span><strong><code><?=esc($chargeDetail['cobranca_asaas_id'] ?: '—')?></code></strong></article></div>
+<?php if (!empty($chargeDetail['pix_encoded_image'])): ?><div class="pix-detail"><h3>Pix copia e cola</h3><img class="pix-qr" alt="QR Code Pix da cobrança" src="data:image/png;base64,<?=esc($chargeDetail['pix_encoded_image'])?>"><label>Pix copia e cola<textarea readonly rows="4"><?=esc($chargeDetail['pix_payload'] ?? '')?></textarea></label></div><?php endif; ?>
+<?php if (!empty($chargeDetail['invoice_url'])): ?><p><a class="button primary" href="<?=esc($chargeDetail['invoice_url'])?>" target="_blank" rel="noopener">Abrir cobrança no Asaas</a></p><?php endif; ?>
+<?php if ($canAct): ?><div class="charge-actions"><form method="post" class="action-card"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="receive_charge"><input type="hidden" name="id" value="<?=esc($chargeDetail['id'])?>"><h3>Dar baixa por recebimento externo</h3><p>Registra no Asaas que o valor integral foi recebido por outro meio.</p><label>Data do recebimento<input type="date" name="payment_date" required value="<?=date('Y-m-d')?>"></label><label class="check-field"><input type="checkbox" name="confirm_receive" value="1" required> Confirmo o recebimento integral</label><button class="button primary">Registrar recebimento</button></form><form method="post" class="action-card"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="cancel_charge"><input type="hidden" name="id" value="<?=esc($chargeDetail['id'])?>"><h3>Cancelar cobrança</h3><p>O cancelamento remove a cobrança pendente no Asaas; não realiza estorno.</p><label class="check-field"><input type="checkbox" name="confirm_cancel" value="1" required> Confirmo o cancelamento desta cobrança</label><button class="button danger">Cancelar cobrança</button></form></div><?php endif; ?></section>
+<?php else: ?><section class="panel"><h2>Gerar cobrança avulsa</h2><p>O painel envia a solicitação ao n8n. Uma nova referência deve ser usada para cada cobrança.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_charge"><label>Serviço<select name="projeto_id" required><option value="">Selecione</option><?php foreach ($projects as $p) if ($p['ativo']): ?><option value="<?=esc($p['id'])?>"><?=esc($p['nome'])?> (<?=esc($p['codigo'])?>)</option><?php endif; ?></select></label><label>Cliente<select name="cliente_id" required><option value="">Selecione</option><?php foreach ($activeCustomers as $c): ?><option value="<?=esc($c['id'])?>"><?=esc($c['nome'] ?: $c['cpf'] ?: $c['cnpj'])?> — <?=esc($c['email'])?></option><?php endforeach; ?></select></label><label>Referência única<input name="referencia" required maxlength="100" placeholder="pedido-2026-001"></label><label>Valor (R$)<input name="valor" required inputmode="decimal" placeholder="10,00"></label><label>Vencimento<input name="vencimento" type="date" required value="<?=date('Y-m-d')?>"></label><label>Descrição (opcional)<input name="descricao" maxlength="200"></label><div class="wide"><button class="button primary" <?=(!$projects || !$activeCustomers) ? 'disabled' : ''?>>Enviar ao n8n e gerar Pix</button></div></form></section><section class="panel"><h2>Últimas cobranças</h2><div class="table-wrap"><table><thead><tr><th>Serviço</th><th>Cliente</th><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Pagamento</th><th>Ações</th></tr></thead><tbody><?php foreach ($charges as $c): ?><tr><td><?=esc($c['projeto_nome'] ?: $c['projeto'])?></td><td><?=esc($c['cliente_nome'] ?: '—')?></td><td><?=esc($c['referencia'])?></td><td><?=esc(is_numeric($c['valor_centavos']) ? money((int)$c['valor_centavos']) : $c['valor_centavos'])?></td><td><?=esc($c['vencimento'])?></td><td><?=esc($c['status'])?></td><td><?php if ($c['invoice_url']): ?><a href="<?=esc($c['invoice_url'])?>" target="_blank" rel="noopener">Abrir</a><?php else: ?><?=esc($c['cobranca_asaas_id'] ?: '—')?><?php endif; ?></td><td class="row-actions"><a class="button small" href="/cobrancas/<?=esc($c['id'])?>">Visualizar</a><?php if (in_array(strtoupper((string)$c['status']), ['PENDING','PENDENTE','AWAITING_PAYMENT','OVERDUE','VENCIDA'], true) && preg_match('/^pay_[A-Za-z0-9]+$/', (string)$c['cobranca_asaas_id'])): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="receive_charge"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><input type="hidden" name="payment_date" value="<?=date('Y-m-d')?>"><button class="button small" name="confirm_receive" value="1" onclick="return confirm('Confirmar recebimento integral por outro meio?')">Dar baixa</button></form><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="cancel_charge"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><button class="button small danger" name="confirm_cancel" value="1" onclick="return confirm('Cancelar esta cobrança pendente no Asaas?')">Cancelar</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$charges): ?><tr><td colspan="8">Nenhuma cobrança cadastrada.</td></tr><?php endif; ?></tbody></table></div></section><?php endif; ?>
 <footer>Pay 360BH · Painel Sandbox · <?=date('Y')?></footer></main></div></body></html>

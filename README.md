@@ -38,7 +38,7 @@ O schema `pvfbh8yqws2olzw` mantém os nomes físicos usados pelo painel e pelo n
 - `POST /api/v1/cobrancas`: criação autenticada por serviço usando `X-Service-Key`.
 - `GET /health`: healthcheck sem dados internos.
 
-O identificador idempotente de pedido é `codigo-do-servico:referencia`. Repetições são recusadas e a restrição única no PostgreSQL continua sendo a proteção final contra concorrência. Pay não altera o status financeiro: somente o fluxo n8n/Asaas deve fazê-lo. Cancelamentos e estornos não fazem parte do MVP.
+O identificador idempotente de pedido e `codigo-do-servico:referencia`. Repeticoes sao recusadas e a restricao unica no PostgreSQL protege contra concorrencia. Pay nao altera status financeiro diretamente: o fluxo n8n/Asaas confirma pagamentos. O Sandbox inclui cancelamento de cobranca pendente e registro de recebimento externo integral; estornos permanecem fora do escopo.
 
 ### Payload da API de serviços
 
@@ -77,7 +77,7 @@ Gere o hash PHP localmente, codifique-o em Base64 e configure `ADMIN_PASSWORD_HA
 
 Crie uma stack Git do repositório usando `compose.portainer.yml`. O serviço se conecta à rede Docker externa `360Network`, compartilhada com Traefik. O Compose não publica portas e não expõe PostgreSQL.
 
-Configure as variáveis obrigatórias no Portainer: `PAY_HOST` (host de homologação com DNS apontando para a VPS), `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH_B64`, `CENTRAL_N8N_PAYMENT_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. O Compose monta `/opt/360bh/secrets/pay360bh_db_password` como arquivo somente leitura dentro do container; esse arquivo é provisionado no VPS pelo script `ops/provision-pay-db-login.sh`. O resolver TLS esperado é `letsencryptresolver`, e o entrypoint é `websecure`, conforme a configuração do Traefik no VPS.
+Configure as variaveis obrigatorias no Portainer: `PAY_HOST`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH_B64`, `CENTRAL_N8N_PAYMENT_WEBHOOK_URL`, `CENTRAL_N8N_ADMIN_ACTION_WEBHOOK_URL` e `CENTRAL_N8N_TOKEN`. Use a URL administrativa Sandbox `https://hook.360bh.com.br/webhook/central-cobrancas-admin-sandbox-v1`. Reutilize o token interno ja configurado na credencial `x-central-token` do n8n; nunca coloque o segredo no Git. O Compose monta `/opt/360bh/secrets/pay360bh_db_password` como arquivo somente leitura dentro do container. O resolver Traefik e `letsencryptresolver` e o entrypoint e `websecure`.
 
 Não use `pay.360bh.com.br` no teste inicial se o domínio ainda servir o legado. Só altere o DNS depois de validar login, banco, cadastro, cobrança Sandbox, webhook e recuperação. Durante homologação, manter o serviço antigo e seu MySQL facilita o rollback.
 
@@ -93,3 +93,10 @@ O workflow Sandbox usa a credencial PostgreSQL `Central Cobranças Sandbox` e os
 - Não apague o banco original `nocodb`, o Pay legado ou o MySQL legado durante a homologação.
 - Para recuperar a cópia inicial, use o dump customizado `/root/backups/central-cobrancas/business-tables-*.dump`; valide o SHA-256 antes de restaurar.
 - Antes da operação comercial, definir retenção de dados e validar os requisitos legais aplicáveis.
+
+
+### Acoes administrativas de cobrancas (Sandbox)
+
+A lista permite visualizar cada cobranca e, enquanto estiver pendente/vencida, solicitar ao Asaas o registro de recebimento integral por outro meio ou o cancelamento. O Pay valida a cobranca no PostgreSQL e chama o webhook administrativo autenticado do n8n; o n8n confere novamente o ID/status no PostgreSQL antes de chamar o Asaas. O Pay nao altera o status financeiro. O webhook Asaas continua responsavel por atualizar o estado oficial.
+
+A tela `/cobrancas/{id}` exibe detalhes e dados Pix disponiveis na resposta do n8n. Configure a URL administrativa Sandbox no Portainer antes de usar as acoes. Nenhuma acao financeira foi executada ao publicar esta funcionalidade.

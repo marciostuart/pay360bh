@@ -7,7 +7,7 @@ Este documento registra o ponto de parada desta sessão para retomarmos sem repe
 - O painel Pay é desenvolvido neste repositório e implantado no VPS por uma Stack Git do Portainer, atrás do Traefik.
 - O subdomínio de homologação `pay-homolog.360bh.com.br` resolve publicamente para `187.41.108.26`. O domínio oficial `pay.360bh.com.br` continua fora da migração e o Pay legado permanece disponível para rollback.
 - A fonte de verdade é o banco PostgreSQL dedicado `central_cobrancas_sandbox`; o Pay é a interface de administração e o n8n processa pagamentos/notificações Asaas. NocoDB não é dependência operacional.
-- O gateway permanece em Asaas Sandbox. Cancelamentos e estornos estão fora do MVP atual.
+- O gateway permanece em Asaas Sandbox. O painel permite cancelar cobrancas pendentes e registrar recebimento externo integral; estornos ficam fora do escopo.
 - Não colocar senha, token, chave de API ou conteúdo de arquivo secreto no Git ou no chat.
 
 ## Feito e confirmado
@@ -55,3 +55,14 @@ Este documento registra o ponto de parada desta sessão para retomarmos sem repe
 ## Como retomar
 
 Retomar pela validação ponta a ponta da versão publicada do workflow e do painel com registros no PostgreSQL dedicado. O banco `nocodb` e os backups permanecem disponíveis para rollback durante a homologação.
+
+
+## Atualizacao: acoes do painel (2026-11-02)
+
+- Corrigido o roteamento da pagina `/cobrancas/{id}`; antes a selecao da aba geral podia interceptar o detalhe e deixar a area principal vazia.
+- Apos criar cobranca, o Pay associa URL da fatura e dados Pix retornados pelo n8n/PostgreSQL, quando disponiveis, e redireciona para os detalhes. Se o webhook ainda nao gravou a linha, informa para nao reenviar cegamente.
+- A tabela de cobrancas tem acao de visualizar e, para cobrancas pendentes/vencidas, acoes de baixa integral por recebimento externo e cancelamento com confirmacao explicita.
+- Criado e publicado no n8n o workflow Sandbox `Central de Cobrancas - Acoes Administrativas Sandbox` (`1LdlHNdJ7xvUnZTH`), com webhook `POST https://hook.360bh.com.br/webhook/central-cobrancas-admin-sandbox-v1`, autenticacao `x-central-token`, autorizacao por ID/status/valor no PostgreSQL e chamadas ao Asaas. O fluxo financeiro atual e o workflow legado nao foram alterados.
+- O recebimento externo usa o endpoint Asaas `receiveInCash` com o valor integral lido do PostgreSQL; cancelamento usa exclusao da cobranca no Asaas. Ambos dependem do webhook financeiro para refletir o estado no banco. Nao registrar baixa se o valor integral nao foi realmente recebido.
+- Codigo atualizado localmente no Pay; deployment Portainer e validacao ponta a ponta ainda pendentes. Configure no Portainer `CENTRAL_N8N_ADMIN_ACTION_WEBHOOK_URL=https://hook.360bh.com.br/webhook/central-cobrancas-admin-sandbox-v1` antes do proximo redeploy. O token usa a variavel existente `CENTRAL_N8N_TOKEN`; nao incluir segredos no Git.
+- Proximas validacoes: gerar uma cobranca Sandbox e confirmar detalhes sem tela branca; validar QR/copia-e-cola; numa cobranca de teste, confirmar recebimento integral externo e ver `PAYMENT_RECEIVED` no PostgreSQL; em outra cobranca pendente, cancelar e confirmar `PAYMENT_DELETED`; verificar repeticao e status terminal. Nenhuma chamada financeira foi feita ao publicar o fluxo.
