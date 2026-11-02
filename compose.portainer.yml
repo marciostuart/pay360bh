@@ -1,6 +1,6 @@
 services:
   pay360bh:
-    image: pay360bh-homolog:login-b64
+    image: pay360bh-homolog:clientes-servicos-v1
     restart: unless-stopped
     environment:
       APP_ENV: homolog

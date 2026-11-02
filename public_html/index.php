@@ -57,7 +57,7 @@ if (empty($_SESSION['admin_authenticated'])) {
         header('Location: /login', true, 303);
         exit;
     }
-    if ($path !== '/login' && $path !== '/') { http_response_code(404); exit('Página não encontrada.'); }
+    if ($path !== '/login' && $path !== '/' && !preg_match('#^/clientes/(novo|[0-9]+/editar)$#', $path)) { http_response_code(404); exit('Pagina nao encontrada.'); }
     $flash = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
     ?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Entrar | Pay 360BH</title><link rel="stylesheet" href="/assets/panel.css"></head><body class="login"><main class="login-card"><div class="brand">360BH <span>Central de Cobranças</span></div><h1>Acessar painel</h1><?php if ($flash): ?><div class="notice error"><?=esc($flash['message'])?></div><?php endif; ?><form method="post" action="/login"><input type="hidden" name="_csrf" value="<?=esc(csrf_token())?>"><label>E-mail<input type="email" name="email" autocomplete="username" required></label><label>Senha<input type="password" name="password" autocomplete="current-password" required></label><button class="button primary">Entrar</button></form></main></body></html><?php exit;
@@ -66,8 +66,21 @@ if (empty($_SESSION['admin_authenticated'])) {
 if ($path === '/' || $path === '/login') { header('Location: /painel', true, 303); exit; }
 admin_required();
 $pdo = db();
+$toBool = static fn(mixed $value): bool => in_array($value, [true, 1, '1', 't', 'true'], true);
+$customerRoute = $path === '/clientes/novo' ? 'new' : (preg_match('#^/clientes/([0-9]+)/editar$#', $path, $routeMatch) ? 'edit' : null);
+$routeCustomerId = $customerRoute === 'edit' ? (int)$routeMatch[1] : null;
+$editingCustomer = null;
+if ($customerRoute === 'edit') {
+    $customerStmt = $pdo->prepare('SELECT * FROM "Clientes MDI" WHERE id = :id');
+    $customerStmt->execute(['id' => $routeCustomerId]);
+    $editingCustomer = $customerStmt->fetch();
+    if ($editingCustomer) $editingCustomer['ativo'] = $toBool($editingCustomer['ativo']);
+    if (!$editingCustomer) { http_response_code(404); exit('Cliente não encontrado.'); }
+}
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
+$customerForm = $_SESSION['customer_form'] ?? [];
+unset($_SESSION['customer_form']);
 $issuedKey = $_SESSION['issued_service_key'] ?? null;
 unset($_SESSION['issued_service_key']);
 $activeTab = in_array($_GET['aba'] ?? '', ['resumo', 'servicos', 'clientes', 'cobrancas'], true) ? (string)$_GET['aba'] : 'resumo';
@@ -96,26 +109,83 @@ if ($method === 'POST') {
             $_SESSION['flash'] = ['type' => 'success', 'message' => 'Situação do serviço atualizada.'];
             header('Location: /painel?aba=servicos', true, 303); exit;
         }
+        if ($action === 'rotate_project_key') {
+            $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+            if (!$id) throw new InvalidArgumentException('Servico invalido.');
+            $plainKey = new_service_key();
+            $stmt = $pdo->prepare('UPDATE "Projetos SANDBOX" SET api_key_hash = :hash WHERE id = :id AND ativo = TRUE RETURNING codigo');
+            $stmt->execute(['hash' => hash('sha256', $plainKey), 'id' => $id]);
+            $code = $stmt->fetchColumn();
+            if (!$code) throw new InvalidArgumentException('Servico inexistente ou inativo. Ative-o antes de gerar uma nova chave.');
+            $_SESSION['issued_service_key'] = ['code' => $code, 'key' => $plainKey];
+            $_SESSION['flash'] = ['type' => 'success', 'message' => 'Chave substituida. A chave anterior foi revogada imediatamente; copie a nova agora.'];
+            header('Location: /painel?aba=servicos', true, 303); exit;
+        }
         if ($action === 'save_customer') {
+            $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+            if ($customerRoute === 'edit' && $id !== $routeCustomerId) throw new InvalidArgumentException('O cliente do formulario nao corresponde ao cadastro aberto. Recarregue a pagina e tente novamente.');
+            if ($customerRoute !== 'edit' && isset($_POST['id'])) throw new InvalidArgumentException('Nao foi possivel identificar o cliente. Recarregue a pagina e tente novamente.');
             $name = trim((string)($_POST['nome'] ?? ''));
-            $document = preg_replace('/\D+/', '', (string)($_POST['documento'] ?? ''));
+            $legalName = trim((string)($_POST['razao_social'] ?? ''));
+            $cpf = preg_replace('/\D+/', '', (string)($_POST['cpf'] ?? ''));
+            $cnpj = preg_replace('/\D+/', '', (string)($_POST['cnpj'] ?? ''));
             $email = trim((string)($_POST['email'] ?? ''));
-            $phone = trim((string)($_POST['telefone'] ?? ''));
-            if ($name === '' || !valid_br_document($document) || !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Preencha nome, CPF/CNPJ válido e e-mail válido.');
-            $lookup = $pdo->prepare("SELECT id FROM \"Clientes MDI\" WHERE regexp_replace(COALESCE(NULLIF(btrim(cpf), ''), cnpj, ''), '[^0-9]', '', 'g') = :doc LIMIT 1");
-            $lookup->execute(['doc' => $document]);
-            $existingId = $lookup->fetchColumn();
-            $columns = 'nome = :nome, razao_social = :razao, cpf = :cpf, cnpj = :cnpj, email = :email, telefone = :telefone, ativo = TRUE';
-            $values = ['nome' => $name, 'razao' => $name, 'cpf' => strlen($document) === 11 ? $document : null, 'cnpj' => strlen($document) === 14 ? $document : null, 'email' => $email, 'telefone' => $phone ?: null];
-            if ($existingId) {
-                $values['id'] = (int)$existingId;
-                $pdo->prepare('UPDATE "Clientes MDI" SET ' . $columns . ' WHERE id = :id')->execute($values);
+            $phone = preg_replace('/\D+/', '', (string)($_POST['telefone'] ?? ''));
+            $contact = trim((string)($_POST['contato'] ?? ''));
+            $address = trim((string)($_POST['endereco'] ?? ''));
+            $number = trim((string)($_POST['numero'] ?? ''));
+            $complement = trim((string)($_POST['numero_complemento'] ?? ''));
+            $district = trim((string)($_POST['bairro'] ?? ''));
+            $city = trim((string)($_POST['municipio'] ?? ''));
+            $state = strtoupper(trim((string)($_POST['estado'] ?? '')));
+            $cep = preg_replace('/\D+/', '', (string)($_POST['cep'] ?? ''));
+            $plan = trim((string)($_POST['plano'] ?? ''));
+            $value = trim((string)($_POST['valor'] ?? ''));
+            $dueDay = trim((string)($_POST['vencimento'] ?? ''));
+            $nextDue = trim((string)($_POST['proximo_vencimento'] ?? ''));
+            $lastNotice = trim((string)($_POST['ultimo_aviso'] ?? ''));
+            if ($cpf !== '' && $cnpj !== '') throw new InvalidArgumentException('Informe CPF ou CNPJ, nao os dois.');
+            $document = $cpf !== '' ? $cpf : $cnpj;
+            if ($name === '' || $document === '' || !valid_br_document($document)) throw new InvalidArgumentException('Nome e um CPF/CNPJ valido sao obrigatorios.');
+            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('O e-mail informado nao e valido.');
+            if (($cpf !== '' && strlen($cpf) !== 11) || ($cnpj !== '' && strlen($cnpj) !== 14)) throw new InvalidArgumentException('Confira a quantidade de digitos do CPF ou CNPJ.');
+            if ($state !== '' && !preg_match('/^[A-Z]{2}$/', $state)) throw new InvalidArgumentException('Informe a UF com duas letras.');
+            if ($number !== '' && (!ctype_digit($number) || strlen($number) > 12)) throw new InvalidArgumentException('Numero do endereco deve ser inteiro.');
+            if ($cep !== '' && strlen($cep) !== 8) throw new InvalidArgumentException('O CEP deve ter 8 digitos.');
+            if ($value !== '' && !preg_match('/^\d{1,10}(?:[,.]\d{1,2})?$/', $value)) throw new InvalidArgumentException('Valor invalido. Use, por exemplo, 49,90.');
+            if ($dueDay !== '' && (!ctype_digit($dueDay) || (int)$dueDay < 1 || (int)$dueDay > 31)) throw new InvalidArgumentException('O vencimento deve ser um dia entre 1 e 31.');
+            if ($nextDue !== '' && (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $nextDue) || !checkdate((int)substr($nextDue, 5, 2), (int)substr($nextDue, 8, 2), (int)substr($nextDue, 0, 4)))) throw new InvalidArgumentException('Confira a data do proximo vencimento.');
+            if ($lastNotice !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $lastNotice)) throw new InvalidArgumentException('Confira a data do ultimo aviso.');
+            $params = [
+                'nome' => $name, 'razao' => $legalName ?: null, 'cpf' => $cpf ?: null, 'cnpj' => $cnpj ?: null,
+                'endereco' => trim($address) ?: null, 'numero' => $number === '' ? null : (int)$number,
+                'complemento' => $complement ?: null, 'bairro' => $district ?: null, 'municipio' => $city ?: null,
+                'estado' => $state ?: null, 'cep' => $cep === '' ? null : (int)$cep, 'contato' => $contact ?: null,
+                'email' => $email ?: null, 'telefone' => $phone ?: null, 'plano' => $plan ?: null,
+                'valor' => $value === '' ? null : str_replace(',', '.', $value),
+                'vencimento' => $dueDay === '' ? null : (int)$dueDay,
+                'proximo_vencimento' => $nextDue ?: null,
+                'ultimo_aviso' => $lastNotice === '' ? null : str_replace('T', ' ', $lastNotice) . ':00',
+                'ativo' => isset($_POST['ativo']),
+            ];
+            if ($id) {
+                $params['id'] = $id;
+                $stmt = $pdo->prepare('UPDATE "Clientes MDI" SET nome=:nome, razao_social=:razao, cpf=:cpf, cnpj=:cnpj, endereco=:endereco, numero=:numero, numero_complemento=:complemento, bairro=:bairro, municipio=:municipio, estado=:estado, cep=:cep, contato=:contato, email=:email, telefone=:telefone, plano=:plano, valor=:valor, vencimento=:vencimento, proximo_vencimento=:proximo_vencimento, ultimo_aviso=:ultimo_aviso, ativo=:ativo, updated_at=NOW() WHERE id=:id');
+                $stmt->execute($params);
                 $message = 'Cadastro do cliente atualizado.';
             } else {
-                $pdo->prepare('INSERT INTO "Clientes MDI" (nome, razao_social, cpf, cnpj, email, telefone, ativo) VALUES (:nome, :razao, :cpf, :cnpj, :email, :telefone, TRUE)')->execute($values);
+                $stmt = $pdo->prepare('INSERT INTO "Clientes MDI" (nome, razao_social, cpf, cnpj, endereco, numero, numero_complemento, bairro, municipio, estado, cep, contato, email, telefone, plano, valor, vencimento, proximo_vencimento, ultimo_aviso, ativo) VALUES (:nome, :razao, :cpf, :cnpj, :endereco, :numero, :complemento, :bairro, :municipio, :estado, :cep, :contato, :email, :telefone, :plano, :valor, :vencimento, :proximo_vencimento, :ultimo_aviso, :ativo)');
+                $stmt->execute($params);
                 $message = 'Cliente cadastrado.';
             }
             $_SESSION['flash'] = ['type' => 'success', 'message' => $message];
+            header('Location: /painel?aba=clientes', true, 303); exit;
+        }
+        if ($action === 'deactivate_customer') {
+            $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+            if (!$id) throw new InvalidArgumentException('Cliente invalido.');
+            $pdo->prepare('UPDATE "Clientes MDI" SET ativo = FALSE, updated_at = NOW() WHERE id = :id')->execute(['id' => $id]);
+            $_SESSION['flash'] = ['type' => 'success', 'message' => 'Cliente inativado. O historico financeiro foi preservado.'];
             header('Location: /painel?aba=clientes', true, 303); exit;
         }
         if ($action === 'create_charge') {
@@ -124,7 +194,7 @@ if ($method === 'POST') {
             $projectQuery = $pdo->prepare('SELECT id, codigo, nome FROM "Projetos SANDBOX" WHERE id = :id AND ativo = TRUE');
             $projectQuery->execute(['id' => $projectId]);
             $project = $projectQuery->fetch();
-            $customerQuery = $pdo->prepare('SELECT id, nome, cpf, cnpj, email, telefone, asaas_id FROM "Clientes MDI" WHERE id = :id');
+            $customerQuery = $pdo->prepare('SELECT id, nome, cpf, cnpj, email, telefone, asaas_id FROM "Clientes MDI" WHERE id = :id AND ativo = TRUE');
             $customerQuery->execute(['id' => $customerId]);
             $customer = $customerQuery->fetch();
             if (!$project || !$customer) throw new InvalidArgumentException('Escolha um serviço ativo e um cliente cadastrado.');
@@ -154,7 +224,9 @@ if ($method === 'POST') {
     } catch (Throwable $e) {
         $_SESSION['flash'] = ['type' => 'error', 'message' => $e->getMessage()];
     }
-    header('Location: /painel?aba=' . rawurlencode($activeTab), true, 303); exit;
+    if ($customerRoute) $_SESSION['customer_form'] = array_merge($_POST, ['_form_submitted' => true]);
+    $errorReturn = $customerRoute === 'edit' ? '/clientes/' . $routeCustomerId . '/editar' : ($customerRoute === 'new' ? '/clientes/novo' : '/painel?aba=' . rawurlencode($activeTab));
+    header('Location: ' . $errorReturn, true, 303); exit;
 }
 
 function find_invoice_url(array $value): ?string
@@ -171,20 +243,43 @@ function find_invoice_url(array $value): ?string
 }
 
 $projects = $pdo->query('SELECT id, codigo, nome, url_notificacao, ativo FROM "Projetos SANDBOX" ORDER BY nome')->fetchAll();
-$customers = $pdo->query('SELECT id, nome, cpf, cnpj, email, telefone, asaas_id FROM "Clientes MDI" ORDER BY id DESC LIMIT 250')->fetchAll();
+foreach ($projects as &$project) $project['ativo'] = $toBool($project['ativo']);
+unset($project);
+$customers = $pdo->query('SELECT id, nome, cpf, cnpj, email, telefone, asaas_id, ativo FROM "Clientes MDI" ORDER BY id DESC')->fetchAll();
+foreach ($customers as &$customer) $customer['ativo'] = $toBool($customer['ativo']);
+unset($customer);
+$activeCustomers = $pdo->query('SELECT id, nome, cpf, cnpj, email FROM "Clientes MDI" WHERE ativo = TRUE ORDER BY id DESC')->fetchAll();
 $charges = $pdo->query('SELECT c.id, c.projeto, c.referencia, c.status, c.valor_centavos, c.vencimento, c.cobranca_asaas_id, c.invoice_url, c.cliente_local_id, p.nome AS projeto_nome, cl.nome AS cliente_nome FROM "Cobrancas SANDBOX" c LEFT JOIN "Projetos SANDBOX" p ON p.id = c.projeto_id LEFT JOIN "Clientes MDI" cl ON cl.id = c.cliente_local_id ORDER BY c.id DESC LIMIT 100')->fetchAll();
 $counts = [
     'projects' => (int)$pdo->query('SELECT COUNT(*) FROM "Projetos SANDBOX"')->fetchColumn(),
-    'customers' => (int)$pdo->query('SELECT COUNT(*) FROM "Clientes MDI"')->fetchColumn(),
+    'customers' => (int)$pdo->query('SELECT COUNT(*) FROM "Clientes MDI" WHERE ativo = TRUE')->fetchColumn(),
     'charges' => (int)$pdo->query('SELECT COUNT(*) FROM "Cobrancas SANDBOX"')->fetchColumn(),
     'pending' => (int)$pdo->query("SELECT COUNT(*) FROM \"Cobrancas SANDBOX\" WHERE upper(status) IN ('PENDING','PENDENTE','AWAITING_PAYMENT')")->fetchColumn(),
 ];
+$pageTitle = $customerRoute ? ($customerRoute === 'new' ? 'Novo cliente' : 'Editar cliente') : ['resumo'=>'Visao geral','servicos'=>'Servicos autorizados','clientes'=>'Clientes compartilhados','cobrancas'=>'Cobrancas'][$activeTab];
 $csrf = csrf_token();
-?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Central de Cobranças | 360BH</title><link rel="stylesheet" href="/assets/panel.css"></head><body><div class="shell"><aside class="sidebar"><div class="brand">360BH <span>Central de Cobranças</span></div><nav><?php foreach (['resumo'=>'Visão geral','servicos'=>'Serviços','clientes'=>'Clientes','cobrancas'=>'Cobranças'] as $key => $label): ?><a class="<?=$activeTab === $key ? 'active' : ''?>" href="/painel?aba=<?=$key?>"><?=esc($label)?></a><?php endforeach; ?></nav><form method="post" action="/logout" class="logout-form"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><button class="logout">Sair</button></form></aside><main class="main"><header><div><p class="eyebrow">AMBIENTE SANDBOX</p><h1><?=esc(['resumo'=>'Visão geral','servicos'=>'Serviços autorizados','clientes'=>'Clientes compartilhados','cobrancas'=>'Cobranças'][$activeTab])?></h1></div><span class="badge">Asaas via n8n</span></header>
+$customerValue = static fn(string $key, string $default = ''): string => esc($customerForm[$key] ?? $editingCustomer[$key] ?? $default);
+$lastNoticeValue = array_key_exists('ultimo_aviso', $customerForm) ? (string)$customerForm['ultimo_aviso'] : '';
+if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer['ultimo_aviso'])) $lastNoticeValue = date('Y-m-d\TH:i', strtotime((string)$editingCustomer['ultimo_aviso']));
+?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Central de Cobranças | 360BH</title><link rel="stylesheet" href="/assets/panel.css"></head><body><div class="shell"><aside class="sidebar"><div class="brand">360BH <span>Central de Cobranças</span></div><nav><?php foreach (['resumo'=>'Visão geral','servicos'=>'Serviços','clientes'=>'Clientes','cobrancas'=>'Cobranças'] as $key => $label): ?><a class="<?=$activeTab === $key ? 'active' : ''?>" href="/painel?aba=<?=$key?>"><?=esc($label)?></a><?php endforeach; ?></nav><form method="post" action="/logout" class="logout-form"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><button class="logout">Sair</button></form></aside><main class="main"><header><div><p class="eyebrow">AMBIENTE SANDBOX</p><h1><?=esc($pageTitle)?></h1></div><span class="badge">Asaas via n8n</span></header>
 <?php if ($flash): ?><div class="notice <?=esc($flash['type'])?>"><?=esc($flash['message'])?></div><?php endif; ?>
 <?php if ($issuedKey): ?><section class="notice warning"><strong>Chave do serviço — copie agora.</strong><p>Ela só aparece nesta tela uma vez. Guarde-a num cofre de senhas.</p><code><?=esc($issuedKey['key'])?></code><p>Serviço: <?=esc($issuedKey['code'])?> · Envie a chave no cabeçalho <code>X-Service-Key</code>.</p></section><?php endif; ?>
-<?php if ($activeTab === 'resumo'): ?><section class="cards"><article><span>Serviços</span><strong><?=$counts['projects']?></strong></article><article><span>Clientes</span><strong><?=$counts['customers']?></strong></article><article><span>Cobranças</span><strong><?=$counts['charges']?></strong></article><article><span>Aguardando pagamento</span><strong><?=$counts['pending']?></strong></article></section><section class="panel"><h2>Como funciona</h2><p>Cadastre serviços e clientes aqui. Uma cobrança manual ou enviada por API segue para o n8n, que conversa com o Asaas Sandbox. O estado financeiro volta pelos webhooks e fica registrado no PostgreSQL.</p><p>Esta versão ainda está em homologação. Não use cobranças comerciais nem altere o DNS do domínio antes de completar a validação ponta a ponta.</p></section>
-<?php elseif ($activeTab === 'servicos'): ?><section class="panel"><h2>Cadastrar serviço</h2><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_project"><label>Código único<input name="codigo" required maxlength="40" placeholder="ex.: hotspot-rural"></label><label>Nome do serviço<input name="nome" required maxlength="160" placeholder="Hotspot Rural"></label><label class="wide">URL para notificações do serviço (opcional)<input name="url_notificacao" type="url" placeholder="https://servico.exemplo/webhook/pagamento"></label><div class="wide"><button class="button primary">Cadastrar e gerar chave</button></div></form></section><section class="panel"><h2>Serviços cadastrados</h2><div class="table-wrap"><table><thead><tr><th>Código</th><th>Nome</th><th>Callback</th><th>Estado</th><th></th></tr></thead><tbody><?php foreach ($projects as $p): ?><tr><td><code><?=esc($p['codigo'])?></code></td><td><?=esc($p['nome'])?></td><td><?=esc($p['url_notificacao'] ?: '—')?></td><td><span class="pill <?=$p['ativo'] ? 'good' : 'off'?>"><?=$p['ativo'] ? 'Ativo' : 'Inativo'?></span></td><td><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="toggle_project"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small"><?=$p['ativo'] ? 'Desativar' : 'Ativar'?></button></form></td></tr><?php endforeach; ?><?php if (!$projects): ?><tr><td colspan="5">Nenhum serviço cadastrado.</td></tr><?php endif; ?></tbody></table></div></section>
-<?php elseif ($activeTab === 'clientes'): ?><section class="panel"><h2>Cadastrar ou atualizar cliente</h2><p>O CPF/CNPJ identifica o cadastro compartilhado entre os serviços.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="save_customer"><label>Nome / razão social<input name="nome" required maxlength="160"></label><label>CPF ou CNPJ<input name="documento" required inputmode="numeric" maxlength="18"></label><label>E-mail<input name="email" type="email" required></label><label>Telefone (opcional)<input name="telefone" inputmode="tel"></label><div class="wide"><button class="button primary">Salvar cliente</button></div></form></section><section class="panel"><h2>Clientes</h2><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Asaas</th></tr></thead><tbody><?php foreach ($customers as $c): ?><tr><td><?=esc($c['nome'] ?: '—')?></td><td><?=esc($c['cpf'] ?: $c['cnpj'] ?: '—')?></td><td><?=esc($c['email'] ?: '—')?></td><td><?=esc($c['asaas_id'] ?: 'Ainda não vinculado')?></td></tr><?php endforeach; ?></tbody></table></div></section>
-<?php else: ?><section class="panel"><h2>Gerar cobrança avulsa</h2><p>O painel envia a solicitação ao n8n. Uma nova referência deve ser usada para cada cobrança.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_charge"><label>Serviço<select name="projeto_id" required><option value="">Selecione</option><?php foreach ($projects as $p) if ($p['ativo']): ?><option value="<?=esc($p['id'])?>"><?=esc($p['nome'])?> (<?=esc($p['codigo'])?>)</option><?php endif; ?></select></label><label>Cliente<select name="cliente_id" required><option value="">Selecione</option><?php foreach ($customers as $c): ?><option value="<?=esc($c['id'])?>"><?=esc($c['nome'] ?: $c['cpf'] ?: $c['cnpj'])?> — <?=esc($c['email'])?></option><?php endforeach; ?></select></label><label>Referência única<input name="referencia" required maxlength="100" placeholder="pedido-2026-001"></label><label>Valor (R$)<input name="valor" required inputmode="decimal" placeholder="10,00"></label><label>Vencimento<input name="vencimento" type="date" required value="<?=date('Y-m-d')?>"></label><label>Descrição (opcional)<input name="descricao" maxlength="200"></label><div class="wide"><button class="button primary" <?=(!$projects || !$customers) ? 'disabled' : ''?>>Enviar ao n8n e gerar Pix</button></div></form></section><section class="panel"><h2>Últimas cobranças</h2><div class="table-wrap"><table><thead><tr><th>Serviço</th><th>Cliente</th><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Pagamento</th></tr></thead><tbody><?php foreach ($charges as $c): ?><tr><td><?=esc($c['projeto_nome'] ?: $c['projeto'])?></td><td><?=esc($c['cliente_nome'] ?: '—')?></td><td><?=esc($c['referencia'])?></td><td><?=esc(is_numeric($c['valor_centavos']) ? money((int)$c['valor_centavos']) : $c['valor_centavos'])?></td><td><?=esc($c['vencimento'])?></td><td><?=esc($c['status'])?></td><td><?php if ($c['invoice_url']): ?><a href="<?=esc($c['invoice_url'])?>" target="_blank" rel="noopener">Abrir</a><?php else: ?><?=esc($c['cobranca_asaas_id'] ?: '—')?><?php endif; ?></td></tr><?php endforeach; ?></tbody></table></div></section><?php endif; ?>
+<?php if ($customerRoute): ?>
+<section class="panel"><h2><?= $customerRoute === 'new' ? 'Dados do cliente' : 'Atualizar dados do cliente' ?></h2><p>O cadastro e compartilhado por todos os servicos. CPF ou CNPJ deve ser unico. Os identificadores Asaas sao gerenciados pela integracao.</p>
+<form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="save_customer"><?php if ($customerRoute === 'edit'): ?><input type="hidden" name="id" value="<?=esc($editingCustomer['id'])?>"><?php endif; ?>
+<label>Nome<input name="nome" required maxlength="160" value="<?=$customerValue('nome')?>"></label><label>Razao social<input name="razao_social" maxlength="255" value="<?=$customerValue('razao_social')?>"></label>
+<label>CPF<input name="cpf" inputmode="numeric" maxlength="14" value="<?=$customerValue('cpf')?>"></label><label>CNPJ<input name="cnpj" inputmode="numeric" maxlength="18" value="<?=$customerValue('cnpj')?>"></label>
+<label>E-mail<input name="email" type="email" maxlength="254" value="<?=$customerValue('email')?>"></label><label>Telefone<input name="telefone" inputmode="tel" maxlength="20" value="<?=$customerValue('telefone')?>"></label>
+<label>Contato<input name="contato" maxlength="255" value="<?=$customerValue('contato')?>"></label><label>CEP<input name="cep" inputmode="numeric" maxlength="9" value="<?=esc($customerForm['cep'] ?? ($editingCustomer ? str_pad((string)$editingCustomer['cep'], 8, '0', STR_PAD_LEFT) : ''))?>"></label>
+<label class="wide">Endereco<input name="endereco" maxlength="255" value="<?=$customerValue('endereco')?>"></label><label>Numero<input name="numero" inputmode="numeric" value="<?=$customerValue('numero')?>"></label><label>Complemento<input name="numero_complemento" maxlength="255" value="<?=$customerValue('numero_complemento')?>"></label>
+<label>Bairro<input name="bairro" maxlength="255" value="<?=$customerValue('bairro')?>"></label><label>Municipio<input name="municipio" maxlength="255" value="<?=$customerValue('municipio')?>"></label><label>Estado (UF)<input name="estado" maxlength="2" value="<?=$customerValue('estado')?>"></label>
+<label>Plano<input name="plano" maxlength="255" value="<?=$customerValue('plano')?>"></label><label>Valor do plano<input name="valor" inputmode="decimal" placeholder="49,90" value="<?=$customerValue('valor')?>"></label><label>Dia de vencimento<input name="vencimento" type="number" min="1" max="31" value="<?=$customerValue('vencimento')?>"></label>
+<label>Proximo vencimento<input name="proximo_vencimento" type="date" value="<?=$customerValue('proximo_vencimento')?>"></label><label>Ultimo aviso<input name="ultimo_aviso" type="datetime-local" value="<?=esc($lastNoticeValue)?>"></label>
+<?php if ($customerRoute === 'edit'): ?><label class="check-field"><input type="checkbox" name="ativo" value="1" <?=((!empty($customerForm['_form_submitted']) ? isset($customerForm['ativo']) : (bool)$editingCustomer['ativo'])) ? 'checked' : ''?>> Cadastro ativo (clientes inativos nao aparecem ao gerar cobrancas)</label><?php else: ?><input type="hidden" name="ativo" value="1"><?php endif; ?>
+<div class="wide"><h3>Integracao Asaas (somente leitura)</h3><p>Estes campos sao atualizados automaticamente pelo fluxo de cobrancas.</p></div><label>ID do cliente Asaas<input readonly value="<?=$customerValue('asaas_id')?>"></label><label>Link de pagamento<input readonly value="<?=$customerValue('link_pagamento')?>"></label><label class="wide">ID da cobranca Asaas<input readonly value="<?=$customerValue('id_cobranca_asaas')?>"></label><label class="wide">Anexo NocoDB (somente leitura)<input readonly value="<?=$customerValue('arquivo')?>"></label>
+<div class="wide form-actions"><button class="button primary">Salvar cliente</button><a class="button" href="/painel?aba=clientes">Cancelar</a></div></form></section>
+<?php elseif ($activeTab === 'resumo'): ?><section class="cards"><article><span>Serviços</span><strong><?=$counts['projects']?></strong></article><article><span>Clientes</span><strong><?=$counts['customers']?></strong></article><article><span>Cobranças</span><strong><?=$counts['charges']?></strong></article><article><span>Aguardando pagamento</span><strong><?=$counts['pending']?></strong></article></section><section class="panel"><h2>Como funciona</h2><p>Cadastre serviços e clientes aqui. Uma cobrança manual ou enviada por API segue para o n8n, que conversa com o Asaas Sandbox. O estado financeiro volta pelos webhooks e fica registrado no PostgreSQL.</p><p>Esta versão ainda está em homologação. Não use cobranças comerciais nem altere o DNS do domínio antes de completar a validação ponta a ponta.</p></section>
+<?php elseif ($activeTab === 'servicos'): ?><section class="panel"><h2>Cadastrar servico</h2><p>Cada servico recebe uma chave secreta exclusiva. Para chamar a API de cobrancas, envie-a no cabecalho <code>X-Service-Key</code>. O valor completo e mostrado apenas uma vez; so o hash fica no banco. A URL abaixo e o destino que recebera notificacoes de pagamento.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_project"><label>Codigo unico<input name="codigo" required maxlength="40" placeholder="ex.: hotspot-rural"></label><label>Nome do servico<input name="nome" required maxlength="160" placeholder="Hotspot Rural"></label><label class="wide">URL de destino para notificacoes (opcional)<input name="url_notificacao" type="url" placeholder="https://servico.exemplo/webhook/pagamento"></label><div class="wide"><button class="button primary">Cadastrar e gerar chave</button></div></form></section><section class="panel"><h2>Servicos cadastrados</h2><div class="table-wrap"><table><thead><tr><th>Codigo</th><th>Nome</th><th>Destino de notificacoes</th><th>Estado</th><th>Acoes</th></tr></thead><tbody><?php foreach ($projects as $p): ?><tr><td><code><?=esc($p['codigo'])?></code></td><td><?=esc($p['nome'])?></td><td><?=esc($p['url_notificacao'] ?: '-')?></td><td><span class="pill <?=$p['ativo'] ? 'good' : 'off'?>"><?=$p['ativo'] ? 'Ativo' : 'Inativo'?></span></td><td class="row-actions"><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="toggle_project"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small"><?=$p['ativo'] ? 'Desativar' : 'Ativar'?></button></form><?php if ($p['ativo']): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="rotate_project_key"><input type="hidden" name="id" value="<?=esc($p['id'])?>"><button class="button small">Trocar chave</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$projects): ?><tr><td colspan="5">Nenhum servico cadastrado.</td></tr><?php endif; ?></tbody></table></div></section>
+<?php elseif ($activeTab === 'clientes'): ?><section class="panel list-heading"><div><h2>Clientes</h2><p>Excluir desativa o cadastro e preserva as cobrancas e o historico financeiro.</p></div><a class="button primary" href="/clientes/novo">Adicionar cliente</a></section><section class="panel"><div class="table-wrap"><table><thead><tr><th>Nome / razao social</th><th>Documento</th><th>E-mail</th><th>Asaas</th><th>Situacao</th><th>Acoes</th></tr></thead><tbody><?php foreach ($customers as $c): ?><tr><td><?=esc($c['nome'] ?: '-')?></td><td><?=esc($c['cpf'] ?: $c['cnpj'] ?: '-')?></td><td><?=esc($c['email'] ?: '-')?></td><td><?=esc($c['asaas_id'] ?: 'Ainda nao vinculado')?></td><td><span class="pill <?=$c['ativo'] ? 'good' : 'off'?>"><?=$c['ativo'] ? 'Ativo' : 'Inativo'?></span></td><td class="row-actions"><a class="button small" href="/clientes/<?=esc($c['id'])?>/editar">Editar</a><?php if ($c['ativo']): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="deactivate_customer"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><button class="button small danger">Excluir</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$customers): ?><tr><td colspan="6">Nenhum cliente cadastrado.</td></tr><?php endif; ?></tbody></table></div></section>
+<?php else: ?><section class="panel"><h2>Gerar cobrança avulsa</h2><p>O painel envia a solicitação ao n8n. Uma nova referência deve ser usada para cada cobrança.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_charge"><label>Serviço<select name="projeto_id" required><option value="">Selecione</option><?php foreach ($projects as $p) if ($p['ativo']): ?><option value="<?=esc($p['id'])?>"><?=esc($p['nome'])?> (<?=esc($p['codigo'])?>)</option><?php endif; ?></select></label><label>Cliente<select name="cliente_id" required><option value="">Selecione</option><?php foreach ($activeCustomers as $c): ?><option value="<?=esc($c['id'])?>"><?=esc($c['nome'] ?: $c['cpf'] ?: $c['cnpj'])?> — <?=esc($c['email'])?></option><?php endforeach; ?></select></label><label>Referência única<input name="referencia" required maxlength="100" placeholder="pedido-2026-001"></label><label>Valor (R$)<input name="valor" required inputmode="decimal" placeholder="10,00"></label><label>Vencimento<input name="vencimento" type="date" required value="<?=date('Y-m-d')?>"></label><label>Descrição (opcional)<input name="descricao" maxlength="200"></label><div class="wide"><button class="button primary" <?=(!$projects || !$activeCustomers) ? 'disabled' : ''?>>Enviar ao n8n e gerar Pix</button></div></form></section><section class="panel"><h2>Últimas cobranças</h2><div class="table-wrap"><table><thead><tr><th>Serviço</th><th>Cliente</th><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Pagamento</th></tr></thead><tbody><?php foreach ($charges as $c): ?><tr><td><?=esc($c['projeto_nome'] ?: $c['projeto'])?></td><td><?=esc($c['cliente_nome'] ?: '—')?></td><td><?=esc($c['referencia'])?></td><td><?=esc(is_numeric($c['valor_centavos']) ? money((int)$c['valor_centavos']) : $c['valor_centavos'])?></td><td><?=esc($c['vencimento'])?></td><td><?=esc($c['status'])?></td><td><?php if ($c['invoice_url']): ?><a href="<?=esc($c['invoice_url'])?>" target="_blank" rel="noopener">Abrir</a><?php else: ?><?=esc($c['cobranca_asaas_id'] ?: '—')?><?php endif; ?></td></tr><?php endforeach; ?></tbody></table></div></section><?php endif; ?>
 <footer>Pay 360BH · Painel Sandbox · <?=date('Y')?></footer></main></div></body></html>
