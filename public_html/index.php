@@ -72,7 +72,7 @@ $routeCustomerId = $customerRoute === 'edit' ? (int)$routeMatch[1] : null;
 $chargeRoute = preg_match('#^/cobrancas/([0-9]+)$#', $path, $chargeMatch) ? (int)$chargeMatch[1] : null;
 $chargeDetail = null;
 if ($chargeRoute !== null) {
-    $detailStmt = $pdo->prepare('SELECT c.*, p.nome AS projeto_nome, cl.nome AS cliente_nome, cl.email AS cliente_email FROM "Cobrancas SANDBOX" c LEFT JOIN "Projetos SANDBOX" p ON p.id = c.projeto_id LEFT JOIN "Clientes MDI" cl ON cl.id = c.cliente_local_id WHERE c.id = :id');
+    $detailStmt = $pdo->prepare('SELECT c.*, p.nome AS projeto_nome, cl.nome AS cliente_nome, cl.email AS cliente_email, COALESCE(to_jsonb(c)->>\'CreatedAt\', to_jsonb(c)->>\'created_at\') AS data_criacao, (SELECT e.created_at FROM "Eventos Asaas SANDBOX" e WHERE e.cobranca_id = c.cobranca_asaas_id AND e.tipo_evento IN (\'PAYMENT_CONFIRMED\', \'PAYMENT_RECEIVED\') ORDER BY e.created_at DESC LIMIT 1) AS confirmacao_recebida_em FROM "Cobrancas SANDBOX" c LEFT JOIN "Projetos SANDBOX" p ON p.id = c.projeto_id LEFT JOIN "Clientes MDI" cl ON cl.id = c.cliente_local_id WHERE c.id = :id');
     $detailStmt->execute(['id' => $chargeRoute]);
     $chargeDetail = $detailStmt->fetch();
     if (!$chargeDetail) { http_response_code(404); exit('Cobranca nao encontrada.'); }
@@ -319,52 +319,52 @@ $webhookFilters = [
     'de' => trim((string)($_GET['de'] ?? '')),
     'ate' => trim((string)($_GET['ate'] ?? '')),
 ];
+$webhookView = in_array($_GET['visao'] ?? '', ['recebidos', 'enviados'], true) ? (string)$_GET['visao'] : 'recebidos';
 $webhookEvents = $webhookDeliveries = [];
 if ($activeTab === 'webhooks') {
-    $eventSql = 'SELECT e.id, e.evento_id, e.tipo_evento, e.cobranca_id, e.referencia, e.status, e.processamento, e.created_at, e.retry_attempts, e.retry_after, d.projeto, p.nome AS projeto_nome, d.situacao AS entrega_situacao FROM "Eventos Asaas SANDBOX" e LEFT JOIN "Entregas SANDBOX" d ON d.evento_id = e.evento_id LEFT JOIN "Projetos SANDBOX" p ON p.codigo = d.projeto WHERE 1=1';
-    $deliverySql = 'SELECT d.id, d.evento_id, d.projeto, p.nome AS projeto_nome, d.referencia, d.cobranca_asaas_id, d.status_cobranca, d.situacao, e.tipo_evento, e.created_at FROM "Entregas SANDBOX" d LEFT JOIN "Eventos Asaas SANDBOX" e ON e.evento_id = d.evento_id LEFT JOIN "Projetos SANDBOX" p ON p.codigo = d.projeto WHERE 1=1';
-    $eventParams = $deliveryParams = [];
+    $receivedAtExpr = "COALESCE(e.created_at, NULLIF(to_jsonb(e)->>'CreatedAt', '')::timestamp)";
+    if ($webhookView === 'recebidos') {
+        $listSql = 'SELECT e.id, e.evento_id, e.tipo_evento, e.cobranca_id, e.referencia, e.status, e.processamento, ' . $receivedAtExpr . ' AS created_at, e.retry_attempts, e.retry_after, d.projeto, p.nome AS projeto_nome, d.situacao AS entrega_situacao FROM "Eventos Asaas SANDBOX" e LEFT JOIN "Entregas SANDBOX" d ON d.evento_id = e.evento_id LEFT JOIN "Projetos SANDBOX" p ON p.codigo = d.projeto WHERE 1=1';
+    } else {
+        $deliveryCreatedAtExpr = "COALESCE(d.created_at, NULLIF(to_jsonb(d)->>'CreatedAt', '')::timestamp, " . $receivedAtExpr . ')';
+        $listSql = 'SELECT d.id, d.evento_id, d.projeto, p.nome AS projeto_nome, d.referencia, d.cobranca_asaas_id, d.status_cobranca, d.situacao, e.tipo_evento, ' . $deliveryCreatedAtExpr . ' AS created_at FROM "Entregas SANDBOX" d LEFT JOIN "Eventos Asaas SANDBOX" e ON e.evento_id = d.evento_id LEFT JOIN "Projetos SANDBOX" p ON p.codigo = d.projeto WHERE 1=1';
+    }
+    $listParams = [];
     if ($webhookFilters['busca'] !== '') {
-        $eventSql .= ' AND (e.evento_id ILIKE :evt_id OR e.cobranca_id ILIKE :evt_payment OR e.referencia ILIKE :evt_reference)';
-        $deliverySql .= ' AND (d.evento_id ILIKE :del_event OR d.cobranca_asaas_id ILIKE :del_payment OR d.referencia ILIKE :del_reference)';
+        $listSql .= $webhookView === 'recebidos'
+            ? ' AND (e.evento_id ILIKE :search_event OR e.cobranca_id ILIKE :search_payment OR e.referencia ILIKE :search_reference)'
+            : ' AND (d.evento_id ILIKE :search_event OR d.cobranca_asaas_id ILIKE :search_payment OR d.referencia ILIKE :search_reference)';
         $pattern = '%' . $webhookFilters['busca'] . '%';
-        $eventParams += ['evt_id' => $pattern, 'evt_payment' => $pattern, 'evt_reference' => $pattern];
-        $deliveryParams += ['del_event' => $pattern, 'del_payment' => $pattern, 'del_reference' => $pattern];
+        $listParams += ['search_event' => $pattern, 'search_payment' => $pattern, 'search_reference' => $pattern];
     }
     if ($webhookFilters['projeto'] !== '') {
-        $eventSql .= ' AND d.projeto = :event_project';
-        $deliverySql .= ' AND d.projeto = :delivery_project';
-        $eventParams['event_project'] = $deliveryParams['delivery_project'] = $webhookFilters['projeto'];
+        $listSql .= ' AND d.projeto = :project';
+        $listParams['project'] = $webhookFilters['projeto'];
     }
-    if (in_array($webhookFilters['processamento'], ['pendente', 'processado'], true)) {
-        $eventSql .= ' AND e.processamento = :processamento';
-        $eventParams['processamento'] = $webhookFilters['processamento'];
+    if ($webhookView === 'recebidos' && in_array($webhookFilters['processamento'], ['pendente', 'processado'], true)) {
+        $listSql .= ' AND e.processamento = :processing';
+        $listParams['processing'] = $webhookFilters['processamento'];
     }
-    if (in_array($webhookFilters['entrega'], ['pendente', 'enviada'], true)) {
-        $deliverySql .= ' AND d.situacao = :delivery_status';
-        $deliveryParams['delivery_status'] = $webhookFilters['entrega'];
+    if ($webhookView === 'enviados' && in_array($webhookFilters['entrega'], ['pendente', 'enviada'], true)) {
+        $listSql .= ' AND d.situacao = :delivery';
+        $listParams['delivery'] = $webhookFilters['entrega'];
     }
     foreach (['de' => 'from_date', 'ate' => 'to_date'] as $key => $param) {
         $date = $webhookFilters[$key];
         if ($date !== '' && preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $date) && checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4))) {
             $operator = $key === 'de' ? '>=' : '<';
-            $eventParam = 'event_' . $param;
-            $deliveryParam = 'delivery_' . $param;
-            $eventCast = $key === 'de' ? 'CAST(:' . $eventParam . ' AS date)' : 'CAST(:' . $eventParam . ' AS date) + INTERVAL \'1 day\'';
-            $deliveryCast = $key === 'de' ? 'CAST(:' . $deliveryParam . ' AS date)' : 'CAST(:' . $deliveryParam . ' AS date) + INTERVAL \'1 day\'';
-            $eventSql .= ' AND e.created_at ' . $operator . ' ' . $eventCast;
-            $deliverySql .= ' AND e.created_at ' . $operator . ' ' . $deliveryCast;
-            $eventParams[$eventParam] = $deliveryParams[$deliveryParam] = $date;
+            $dateParam = $key . '_date';
+            $dateCast = $key === 'de' ? 'CAST(:' . $dateParam . ' AS date)' : 'CAST(:' . $dateParam . ' AS date) + INTERVAL \'1 day\'';
+            $timestampExpr = $webhookView === 'recebidos' ? $receivedAtExpr : $deliveryCreatedAtExpr;
+            $listSql .= ' AND (' . $timestampExpr . ') ' . $operator . ' ' . $dateCast;
+            $listParams[$dateParam] = $date;
         }
     }
-    $eventSql .= ' ORDER BY e.id DESC LIMIT 200';
-    $deliverySql .= ' ORDER BY d.id DESC LIMIT 200';
-    $eventQuery = $pdo->prepare($eventSql);
-    $eventQuery->execute($eventParams);
-    $webhookEvents = $eventQuery->fetchAll();
-    $deliveryQuery = $pdo->prepare($deliverySql);
-    $deliveryQuery->execute($deliveryParams);
-    $webhookDeliveries = $deliveryQuery->fetchAll();
+    $listSql .= $webhookView === 'recebidos' ? ' ORDER BY e.id DESC LIMIT 200' : ' ORDER BY d.id DESC LIMIT 200';
+    $listQuery = $pdo->prepare($listSql);
+    $listQuery->execute($listParams);
+    if ($webhookView === 'recebidos') $webhookEvents = $listQuery->fetchAll();
+    else $webhookDeliveries = $listQuery->fetchAll();
 }
 $counts = [
     'projects' => (int)$pdo->query('SELECT COUNT(*) FROM "Projetos SANDBOX"')->fetchColumn(),
@@ -451,10 +451,10 @@ if (!array_key_exists('ultimo_aviso', $customerForm) && !empty($editingCustomer[
 </section>
 <?php elseif ($activeTab === 'clientes'): ?><section class="panel list-heading"><div><h2>Clientes</h2><p>Excluir desativa o cadastro e preserva as cobrancas e o historico financeiro.</p></div><a class="button primary" href="/clientes/novo">Adicionar cliente</a></section><section class="panel"><div class="table-wrap"><table><thead><tr><th>Nome / razao social</th><th>Documento</th><th>E-mail</th><th>Asaas</th><th>Situacao</th><th>Acoes</th></tr></thead><tbody><?php foreach ($customers as $c): ?><tr><td><?=esc($c['nome'] ?: '-')?></td><td><?=esc($c['cpf'] ?: $c['cnpj'] ?: '-')?></td><td><?=esc($c['email'] ?: '-')?></td><td><?=esc($c['asaas_id'] ?: 'Ainda nao vinculado')?></td><td><span class="pill <?=$c['ativo'] ? 'good' : 'off'?>"><?=$c['ativo'] ? 'Ativo' : 'Inativo'?></span></td><td class="row-actions"><a class="button small" href="/clientes/<?=esc($c['id'])?>/editar">Editar</a><?php if ($c['ativo']): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="deactivate_customer"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><button class="button small danger">Excluir</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$customers): ?><tr><td colspan="6">Nenhum cliente cadastrado.</td></tr><?php endif; ?></tbody></table></div></section>
 <?php elseif ($chargeDetail): ?>
-<?php $canAct = in_array(strtoupper((string)$chargeDetail['status']), ['PENDING', 'PENDENTE', 'AWAITING_PAYMENT', 'OVERDUE', 'VENCIDA'], true) && preg_match('/^pay_[A-Za-z0-9]+$/', (string)$chargeDetail['cobranca_asaas_id']); ?>
+<?php $chargeStatus = strtoupper(trim((string)$chargeDetail['status'])); $isPendingCharge = in_array($chargeStatus, ['PENDING', 'PENDENTE', 'AWAITING_PAYMENT'], true); $canAct = in_array($chargeStatus, ['PENDING', 'PENDENTE', 'AWAITING_PAYMENT', 'OVERDUE', 'VENCIDA'], true) && preg_match('/^pay_[A-Za-z0-9]+$/', (string)$chargeDetail['cobranca_asaas_id']); $formatDetailDate = static function (mixed $value, bool $withTime = false): string { if ($value === null || $value === '') return '—'; $timestamp = strtotime((string)$value); return $timestamp === false ? (string)$value : date($withTime ? 'd/m/Y H:i' : 'd/m/Y', $timestamp); }; ?>
 <section class="panel"><div class="list-heading"><div><h2><?=esc($chargeDetail['cliente_nome'] ?: 'Cliente')?> — <?=esc($chargeDetail['referencia'] ?: 'Cobrança')?></h2><p><?=esc($chargeDetail['projeto_nome'] ?: $chargeDetail['projeto'])?> — <?=esc($chargeDetail['cliente_email'] ?: '')?></p></div><a class="button" href="/painel?aba=cobrancas">Voltar às cobranças</a></div>
 <div class="detail-grid"><article><span>Valor</span><strong><?=esc(is_numeric($chargeDetail['valor_centavos']) ? money((int)$chargeDetail['valor_centavos']) : $chargeDetail['valor_centavos'])?></strong></article><article><span>Status</span><strong><?=esc($chargeDetail['status'])?></strong></article><article><span>Vencimento</span><strong><?=esc($chargeDetail['vencimento'] ?: '—')?></strong></article><article><span>ID Asaas</span><strong><code><?=esc($chargeDetail['cobranca_asaas_id'] ?: '—')?></code></strong></article></div>
-<?php if (!empty($chargeDetail['pix_encoded_image'])): ?><div class="pix-detail"><h3>Pix copia e cola</h3><img class="pix-qr" alt="QR Code Pix da cobrança" src="data:image/png;base64,<?=esc($chargeDetail['pix_encoded_image'])?>"><label>Pix copia e cola<textarea readonly rows="4"><?=esc($chargeDetail['pix_payload'] ?? '')?></textarea></label></div><?php endif; ?>
+<?php if ($isPendingCharge && (!empty($chargeDetail['pix_encoded_image']) || !empty($chargeDetail['pix_payload']))): ?><div class="pix-detail"><h3>Pix copia e cola</h3><?php if (!empty($chargeDetail['pix_encoded_image'])): ?><img class="pix-qr" alt="QR Code Pix da cobrança" src="data:image/png;base64,<?=esc($chargeDetail['pix_encoded_image'])?>"><?php endif; ?><?php if (!empty($chargeDetail['pix_payload'])): ?><label>Pix copia e cola<textarea readonly rows="4"><?=esc($chargeDetail['pix_payload'])?></textarea></label><?php endif; ?></div><?php elseif (!$isPendingCharge): ?><section class="charge-extra"><h3>Informações complementares</h3><div class="detail-grid"><article><span>Data de criação</span><strong><?=esc($formatDetailDate($chargeDetail['data_criacao'] ?? null, true))?></strong></article><article><span>Confirmação recebida pela Central</span><strong><?=esc($formatDetailDate($chargeDetail['confirmacao_recebida_em'] ?? null, true))?></strong></article><article><span>Referência</span><strong><?=esc($chargeDetail['referencia'] ?: '—')?></strong></article><article><span>Serviço</span><strong><?=esc($chargeDetail['projeto_nome'] ?: $chargeDetail['projeto'] ?: '—')?></strong></article><article><span>Descrição</span><strong><?=esc($chargeDetail['descricao'] ?: '—')?></strong></article><article><span>Cliente</span><strong><?=esc($chargeDetail['cliente_nome'] ?: '—')?></strong></article></div></section><?php endif; ?>
 <?php if (!empty($chargeDetail['invoice_url'])): ?><p><a class="button primary" href="<?=esc($chargeDetail['invoice_url'])?>" target="_blank" rel="noopener">Abrir cobrança no Asaas</a></p><?php endif; ?>
 <?php if ($canAct): ?><div class="charge-actions"><form method="post" class="action-card"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="receive_charge"><input type="hidden" name="id" value="<?=esc($chargeDetail['id'])?>"><h3>Dar baixa por recebimento externo</h3><p>Registra no Asaas que o valor integral foi recebido por outro meio.</p><p class="notice warning">Atenção: se houver negativacão em andamento, o Asaas pode cobrar tarifa de ativação ao registrar o recebimento.</p><label>Data do recebimento<input type="date" name="payment_date" required value="<?=date('Y-m-d')?>"></label><label class="check-field"><input type="checkbox" name="confirm_receive" value="1" required> Confirmo o recebimento integral</label><button class="button primary">Registrar recebimento</button></form><form method="post" class="action-card"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="cancel_charge"><input type="hidden" name="id" value="<?=esc($chargeDetail['id'])?>"><h3>Cancelar cobrança</h3><p>O cancelamento remove a cobrança pendente no Asaas; não realiza estorno.</p><label class="check-field"><input type="checkbox" name="confirm_cancel" value="1" required> Confirmo o cancelamento desta cobrança</label><button class="button danger">Cancelar cobrança</button></form></div><?php endif; ?></section>
 <?php else: ?><section class="panel"><h2>Gerar cobrança avulsa</h2><p>O painel envia a solicitação ao n8n. Uma nova referência deve ser usada para cada cobrança.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="create_charge"><label>Serviço<select name="projeto_id" required><option value="">Selecione</option><?php foreach ($projects as $p) if ($p['ativo']): ?><option value="<?=esc($p['id'])?>"><?=esc($p['nome'])?> (<?=esc($p['codigo'])?>)</option><?php endif; ?></select></label><label>Cliente<select name="cliente_id" required><option value="">Selecione</option><?php foreach ($activeCustomers as $c): ?><option value="<?=esc($c['id'])?>"><?=esc($c['nome'] ?: $c['cpf'] ?: $c['cnpj'])?> — <?=esc($c['email'])?></option><?php endforeach; ?></select></label><label>Referência única<input name="referencia" required maxlength="100" placeholder="pedido-2026-001"></label><label>Valor (R$)<input name="valor" required inputmode="decimal" placeholder="10,00"></label><label>Vencimento<input name="vencimento" type="date" required value="<?=date('Y-m-d')?>"></label><label>Descrição (opcional)<input name="descricao" maxlength="200"></label><div class="wide"><button class="button primary" <?=(!$projects || !$activeCustomers) ? 'disabled' : ''?>>Enviar ao n8n e gerar Pix</button></div></form></section><section class="panel"><h2>Últimas cobranças</h2><div class="table-wrap"><table class="charge-table"><colgroup><col><col><col><col><col><col><col><col></colgroup><thead><tr><th>Serviço</th><th>Cliente</th><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Pagamento</th><th>Ações</th></tr></thead><tbody><?php foreach ($charges as $c): ?><tr><td><?=esc($c['projeto_nome'] ?: $c['projeto'])?></td><td><?=esc($c['cliente_nome'] ?: '—')?></td><td><?=esc($c['referencia'])?></td><td><?=esc(is_numeric($c['valor_centavos']) ? money((int)$c['valor_centavos']) : $c['valor_centavos'])?></td><td><?=esc($c['vencimento'])?></td><td><?=esc($c['status'])?></td><td><?php if ($c['invoice_url']): ?><a href="<?=esc($c['invoice_url'])?>" target="_blank" rel="noopener">Abrir</a><?php else: ?><?=esc($c['cobranca_asaas_id'] ?: '—')?><?php endif; ?></td><td class="row-actions"><a class="button small" href="/cobrancas/<?=esc($c['id'])?>">Visualizar</a><?php if (in_array(strtoupper((string)$c['status']), ['PENDING','PENDENTE','AWAITING_PAYMENT','OVERDUE','VENCIDA'], true) && preg_match('/^pay_[A-Za-z0-9]+$/', (string)$c['cobranca_asaas_id'])): ?><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="receive_charge"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><input type="hidden" name="payment_date" value="<?=date('Y-m-d')?>"><button class="button small" name="confirm_receive" value="1" onclick="return confirm('Confirmar recebimento integral por outro meio?')">Dar baixa</button></form><form method="post"><input type="hidden" name="_csrf" value="<?=esc($csrf)?>"><input type="hidden" name="action" value="cancel_charge"><input type="hidden" name="id" value="<?=esc($c['id'])?>"><button class="button small danger" name="confirm_cancel" value="1" onclick="return confirm('Cancelar esta cobrança pendente no Asaas?')">Cancelar</button></form><?php endif; ?></td></tr><?php endforeach; ?><?php if (!$charges): ?><tr><td colspan="8">Nenhuma cobrança cadastrada.</td></tr><?php endif; ?></tbody></table></div></section><?php endif; ?>

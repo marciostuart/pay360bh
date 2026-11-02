@@ -56,6 +56,13 @@ Este documento registra o ponto de parada desta sessão para retomarmos sem repe
 
 Retomar pela validação ponta a ponta da versão publicada do workflow e do painel com registros no PostgreSQL dedicado. O banco `nocodb` e os backups permanecem disponíveis para rollback durante a homologação.
 
+## Atualização de interface e horários dos webhooks (2026-11-02)
+
+- A tela de logs agora tem duas abas mutuamente exclusivas: eventos recebidos do Asaas e notificações enviadas aos serviços. Os filtros atualizam somente a lista da aba selecionada.
+- Detalhes de cobranças que não estão pendentes ocultam QR Code e Pix copia e cola e mostram informações complementares.
+- O workflow Sandbox grava explicitamente `created_at` ao registrar eventos Asaas e entregas aos serviços. A versão ativa foi publicada no n8n; o ajuste vale para novos registros, sem preencher horários históricos ausentes.
+- Código do Pay ainda precisa ser publicado na imagem nova do Portainer e validado na homologação.
+
 
 ## Atualizacao: acoes do painel (2026-11-02)
 
@@ -77,3 +84,9 @@ Retomar pela validação ponta a ponta da versão publicada do workflow e do pai
 - Limitacao registrada: o schema atual de `Entregas SANDBOX` guarda situacao e claim, mas nao guarda codigo HTTP nem resposta de erro do destino. A tela informa essa limitacao; capturar esses dados e uma melhoria posterior do fluxo de entrega.
 - Proximo ajuste visual enfileirado: nos detalhes de cobrancas com status diferente de pendente, ocultar QR Code e Pix copia e cola e exibir datas e demais informacoes complementares disponiveis.
 - Commit `a14c254` foi publicado em `main`. O Compose agora referencia `pay360bh-homolog:webhook-logs-a14c254`; a imagem ainda precisa ser construida em Portainer > Images > Build image usando `https://github.com/marciostuart/pay360bh.git`, nome/tag `pay360bh-homolog:webhook-logs-a14c254`, e entao a stack deve ser redeployada sem Pull images. Manter `service-row-aligned-v1` disponivel como rollback.
+## Atualização de interface e horários dos webhooks (2026-11-02)
+
+- A tela de logs agora tem duas abas mutuamente exclusivas: eventos recebidos do Asaas e notificações enviadas aos serviços. Os filtros atualizam somente a lista da aba selecionada.
+- Detalhes de cobranças que não estão pendentes ocultam QR Code e Pix copia e cola e mostram informações complementares.
+- O workflow Sandbox grava explicitamente created_at ao registrar eventos Asaas e entregas aos serviços. A versão ativa foi publicada no n8n; o ajuste vale para novos registros, sem preencher horários históricos ausentes.
+- Código do Pay ainda precisa ser publicado na imagem nova do Portainer e validado na homologação.
