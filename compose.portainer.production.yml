@@ -1,0 +1,36 @@
+services:
+  pay360bh-production:
+    image: ${PAY_PROD_IMAGE:?defina a imagem de producao construida no Portainer}
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_URL: https://${PAY_PROD_HOST:?defina o dominio de producao}
+      ADMIN_EMAIL: ${PAY_PROD_ADMIN_EMAIL:?defina o email administrativo}
+      ADMIN_PASSWORD_HASH_B64: ${PAY_PROD_ADMIN_PASSWORD_HASH_B64:?defina o hash da senha administrativa em Base64}
+      DB_DRIVER: pgsql
+      DB_HOST: postgres-postgres-1
+      DB_PORT: 5432
+      DB_DATABASE: central_cobrancas_prod
+      DB_SCHEMA: central_cobrancas
+      DB_USERNAME: pay360bh_prod_login
+      DB_PASSWORD_FILE: /run/secrets/pay_db_password
+      CENTRAL_N8N_PAYMENT_WEBHOOK_URL: ${PAY_PROD_N8N_PAYMENT_WEBHOOK_URL:?defina o webhook de criacao de producao}
+      CENTRAL_N8N_ADMIN_ACTION_WEBHOOK_URL: ${PAY_PROD_N8N_ADMIN_WEBHOOK_URL:?defina o webhook administrativo de producao}
+      CENTRAL_N8N_TOKEN_FILE: /run/secrets/central_n8n_token
+    networks:
+      - 360Network
+    volumes:
+      - /opt/360bh/secrets/pay360bh_prod_db_password:/run/secrets/pay_db_password:ro
+      - /opt/360bh/secrets/pay360bh_prod_n8n_token:/run/secrets/central_n8n_token:ro
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=360Network
+      - traefik.http.routers.pay360bh-production.rule=Host(`${PAY_PROD_HOST}`)
+      - traefik.http.routers.pay360bh-production.entrypoints=websecure
+      - traefik.http.routers.pay360bh-production.tls=true
+      - traefik.http.routers.pay360bh-production.tls.certresolver=letsencryptresolver
+      - traefik.http.services.pay360bh-production.loadbalancer.server.port=80
+
+networks:
+  360Network:
+    external: true

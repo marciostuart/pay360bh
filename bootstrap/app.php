@@ -9,6 +9,15 @@ function envv(string $name, ?string $default = null): ?string
     return $value === false ? $default : $value;
 }
 
+function central_n8n_token(): string
+{
+    $path = (string)envv('CENTRAL_N8N_TOKEN_FILE', '');
+    if ($path !== '') {
+        return is_readable($path) ? trim((string)file_get_contents($path)) : '';
+    }
+    return (string)envv('CENTRAL_N8N_TOKEN', '');
+}
+
 function db(): PDO
 {
     static $pdo;
@@ -171,7 +180,7 @@ function cents_from_brl(string $amount): int
 function notify_payment_workflow(array $payload): array
 {
     $url = (string)envv('CENTRAL_N8N_PAYMENT_WEBHOOK_URL', '');
-    $token = (string)envv('CENTRAL_N8N_TOKEN', '');
+    $token = central_n8n_token();
     if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://') || $token === '') {
         throw new RuntimeException('Webhook interno do n8n não configurado com HTTPS.');
     }
@@ -199,7 +208,7 @@ function notify_payment_workflow(array $payload): array
 function notify_charge_admin_action(array $payload): array
 {
     $url = (string)envv('CENTRAL_N8N_ADMIN_ACTION_WEBHOOK_URL', '');
-    $token = (string)envv('CENTRAL_N8N_TOKEN', '');
+    $token = central_n8n_token();
     if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://') || $token === '') {
         throw new RuntimeException('A integração segura de ações de cobrança não está configurada.');
     }

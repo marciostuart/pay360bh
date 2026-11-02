@@ -13,6 +13,8 @@ Aplicação PHP para administrar serviços, clientes compartilhados e cobranças
 
 O registro de continuidade e o checklist de homologação estão em [`docs/ANDAMENTO-HOMOLOGACAO.md`](docs/ANDAMENTO-HOMOLOGACAO.md).
 
+A preparação isolada da produção e suas pendências estão em [`docs/PREPARACAO-PRODUCAO.md`](docs/PREPARACAO-PRODUCAO.md).
+
 ## Arquitetura
 
 ```text

@@ -5,6 +5,9 @@
 storage
 database
 ops
+!ops/
+ops/*
+!ops/prepare-production.php
 *.dump
 *.sql
 README.md
